@@ -1,6 +1,6 @@
-// background.js - 100% Thuần Native Chrome Capture (Phân tách chuyên biệt Desktop PC vs Mobile)
+// background.js - 100% Thuần Native Chrome Capture (Tự động phục hồi Tab ID & Chống lỗi 'No tab with id')
 
-console.log('📸 Background service worker started (100% Pure Native Engine)');
+console.log('📸 Background service worker started (100% Pure Native Engine - Self-Healing Tab Resolver)');
 
 const api = (typeof browser !== 'undefined' && browser.runtime) ? browser : chrome;
 
@@ -17,30 +17,70 @@ api.storage.local.get('captureHistory', (data) => {
     }
 });
 
-// ==================== UNIVERSAL HELPERS ====================
+// ==================== TỰ ĐỘNG TÌM & PHỤC HỒI TAB ID CHÍNH XÁC ====================
+
+async function getLiveTabId(providedTabId) {
+    if (providedTabId) {
+        try {
+            const tab = await api.tabs.get(providedTabId);
+            if (tab && tab.id) return { tabId: tab.id, windowId: tab.windowId };
+        } catch (e) {}
+    }
+    
+    // Tìm tab đang active thực tế trên Lemur / Chrome
+    try {
+        const activeTabs = await api.tabs.query({ active: true });
+        if (activeTabs && activeTabs.length > 0) {
+            return { tabId: activeTabs[0].id, windowId: activeTabs[0].windowId };
+        }
+    } catch (e) {}
+
+    return { tabId: providedTabId, windowId: null };
+}
 
 async function executeScriptUniversal(tabId, func, args = []) {
-    if (api.scripting && api.scripting.executeScript) {
-        const results = await api.scripting.executeScript({
-            target: { tabId },
-            func: func,
-            args: args
-        });
-        return results && results[0] ? results[0].result : null;
-    } else if (api.tabs && api.tabs.executeScript) {
-        const code = `(${func.toString()})(${args.map(a => JSON.stringify(a)).join(',')})`;
-        const results = await new Promise((resolve, reject) => {
-            api.tabs.executeScript(tabId, { code }, (res) => {
-                if (api.runtime.lastError) reject(new Error(api.runtime.lastError.message));
-                else resolve(res);
+    let currentId = tabId;
+
+    try {
+        if (api.scripting && api.scripting.executeScript) {
+            const results = await api.scripting.executeScript({
+                target: { tabId: currentId },
+                func: func,
+                args: args
             });
-        });
-        return results && results[0] !== undefined ? results[0] : null;
+            return results && results[0] ? results[0].result : null;
+        } else if (api.tabs && api.tabs.executeScript) {
+            const code = `(${func.toString()})(${args.map(a => JSON.stringify(a)).join(',')})`;
+            const results = await new Promise((resolve, reject) => {
+                api.tabs.executeScript(currentId, { code }, (res) => {
+                    if (api.runtime.lastError) reject(new Error(api.runtime.lastError.message));
+                    else resolve(res);
+                });
+            });
+            return results && results[0] !== undefined ? results[0] : null;
+        }
+    } catch (err) {
+        // Tự động phục hồi nếu tabId bị stale/thay đổi trên Lemur Browser
+        if (err.message && err.message.includes('No tab with id')) {
+            const live = await getLiveTabId(null);
+            if (live.tabId && live.tabId !== currentId) {
+                currentId = live.tabId;
+                if (api.scripting && api.scripting.executeScript) {
+                    const results = await api.scripting.executeScript({
+                        target: { tabId: currentId },
+                        func: func,
+                        args: args
+                    });
+                    return results && results[0] ? results[0].result : null;
+                }
+            }
+        }
+        throw err;
     }
     throw new Error('Trình duyệt không hỗ trợ scripting API');
 }
 
-// BỘ CHỤP NATIVE TỰ ĐỘNG NHẬN DIỆN WINDOW ID TRÊN ANDROID / LEMUR / CHROME
+// BỘ CHỤP NATIVE TỰ ĐỘNG NHẬN DIỆN WINDOW ID
 function captureTabUniversal(targetWindowId = null) {
     return new Promise(async (resolve, reject) => {
         const captureFn = (api.tabs && api.tabs.captureVisibleTab) ? api.tabs.captureVisibleTab.bind(api.tabs) : null;
@@ -100,7 +140,7 @@ function captureTabUniversal(targetWindowId = null) {
     });
 }
 
-// Ghép các slice ảnh lại OffscreenCanvas hoàn hảo không mất chữ hay đường kẻ
+// Ghép các slice ảnh lại OffscreenCanvas
 async function stitchCaptures(captures, totalWidth, totalHeight, dpr) {
     const canvasWidth = Math.max(1, Math.round(totalWidth * dpr));
     const canvasHeight = Math.max(1, Math.round(totalHeight * dpr));
@@ -140,21 +180,17 @@ async function stitchCaptures(captures, totalWidth, totalHeight, dpr) {
     return `data:image/png;base64,${btoa(binary)}`;
 }
 
-// ==================== BỘ CUỘN DÀI NATIVE (BẢO LƯU 100% CƠ CHẾ PC, TỐI ƯU RIÊNG CHO MOBILE) ====================
+// ==================== BỘ CUỘN DÀI NATIVE ====================
 
-async function captureScrollNative(tabId, mode = 'third', initialWindowId = null) {
+async function captureScrollNative(initialTabId, mode = 'third', initialWindowId = null) {
     let originalScrollX = 0, originalScrollY = 0;
     
-    let targetWinId = initialWindowId;
-    try {
-        const tabInfo = await api.tabs.get(tabId);
-        if (tabInfo && tabInfo.windowId !== undefined) {
-            targetWinId = tabInfo.windowId;
-        }
-    } catch (e) {}
+    const live = await getLiveTabId(initialTabId);
+    let currentTabId = live.tabId || initialTabId;
+    let targetWinId = live.windowId || initialWindowId;
 
     try {
-        const dim = await executeScriptUniversal(tabId, () => {
+        const dim = await executeScriptUniversal(currentTabId, () => {
             const clientWidth = document.documentElement.clientWidth || window.innerWidth;
             const isMobileDevice = (window.innerWidth <= 768) || /Android|iPhone|iPad|Mobile/i.test(navigator.userAgent);
             
@@ -203,13 +239,11 @@ async function captureScrollNative(tabId, mode = 'third', initialWindowId = null
         if (mode === 'third') {
             const oneThird = Math.round(totalHeight / 3);
             if (isMobile) {
-                // Trên Mobile: Chụp khoảng 2.5x màn hình để bao trọn câu hỏi và các đáp án
                 const multiScreens = Math.round(viewportHeight * 2.5);
                 targetCaptureHeight = Math.max(multiScreens, oneThird);
                 targetCaptureHeight = Math.min(targetCaptureHeight, totalHeight - startY);
                 targetCaptureHeight = Math.max(targetCaptureHeight, Math.min(viewportHeight, totalHeight));
             } else {
-                // Trên PC: Giữ nguyên chuẩn 1/3 chiều cao trang gốc
                 targetCaptureHeight = Math.min(oneThird, totalHeight - startY);
                 targetCaptureHeight = Math.max(targetCaptureHeight, Math.min(viewportHeight, totalHeight - startY));
             }
@@ -224,13 +258,11 @@ async function captureScrollNative(tabId, mode = 'third', initialWindowId = null
         let iteration = 0;
         const maxIterations = 15;
 
-        // Vòng lặp cuộn và ghép chính xác từng pixel
         while (accumulatedHeight < targetCaptureHeight && iteration < maxIterations) {
             const isFirstSlice = (iteration === 0);
             const targetScrollY = startY + accumulatedHeight;
 
-            // Cuộn đến vị trí chính xác
-            const actualScrollY = await executeScriptUniversal(tabId, (y, isFirst, isMob) => {
+            const actualScrollY = await executeScriptUniversal(currentTabId, (y, isFirst, isMob) => {
                 window.scrollTo(0, y);
                 document.documentElement.scrollTop = y;
                 document.body.scrollTop = y;
@@ -252,7 +284,6 @@ async function captureScrollNative(tabId, mode = 'third', initialWindowId = null
 
                 if (!isFirst) {
                     if (isMob) {
-                        // CHỈ ÁP DỤNG TRÊN MOBILE: Ẩn thanh header/panel của Azota từ khung 2 trở đi
                         const fixedCandidates = document.querySelectorAll('div, header, nav, section, [role="banner"], [role="navigation"]');
                         for (const el of fixedCandidates) {
                             if (el.classList.contains('capture-temp-ui') || el.closest('.capture-temp-ui')) continue;
@@ -272,7 +303,6 @@ async function captureScrollNative(tabId, mode = 'third', initialWindowId = null
                             }
                         }
                     } else {
-                        // TRÊN PC: Cơ chế Desktop chuẩn
                         const headers = document.querySelectorAll('header, nav, [role="banner"]');
                         headers.forEach(el => {
                             if (!el.dataset.prevVis) {
@@ -288,7 +318,6 @@ async function captureScrollNative(tabId, mode = 'third', initialWindowId = null
 
             const currentActualY = (actualScrollY !== null && actualScrollY !== undefined) ? actualScrollY : targetScrollY;
 
-            // Chờ GPU render lại khung hình
             await new Promise(r => setTimeout(r, 260));
 
             const dataUrl = await captureTabUniversal(targetWinId);
@@ -336,7 +365,7 @@ async function captureScrollNative(tabId, mode = 'third', initialWindowId = null
 
     } finally {
         try {
-            await executeScriptUniversal(tabId, (origX, origY, isMob) => {
+            await executeScriptUniversal(currentTabId, (origX, origY, isMob) => {
                 window.scrollTo(origX, origY);
                 document.documentElement.scrollTop = origY;
                 document.body.scrollTop = origY;
@@ -705,15 +734,10 @@ api.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
 
     if (message.type === 'CAPTURE_FULL_PAGE_NATIVE') {
-        const tabId = message.tabId || (sender.tab ? sender.tab.id : null);
+        const initialTabId = message.tabId || (sender.tab ? sender.tab.id : null);
         const winId = sender.tab ? sender.tab.windowId : null;
 
-        if (!tabId) {
-            sendResponse({ success: false, error: 'Không xác định được tab' });
-            return true;
-        }
-
-        captureScrollNative(tabId, message.mode || 'third', winId).then((dataUrl) => {
+        captureScrollNative(initialTabId, message.mode || 'third', winId).then((dataUrl) => {
             sendResponse({ success: true, dataUrl });
         }).catch((err) => {
             console.error('Lỗi capture cuộn native:', err);
@@ -837,4 +861,4 @@ api.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return false;
 });
 
-console.log('✅ Background ready with isolated Mobile & PC Engine!');
+console.log('✅ Background ready with Self-Healing Tab Resolver!');
