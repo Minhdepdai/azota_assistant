@@ -1,4 +1,4 @@
-// background.js - 100% Thuần Native Chrome Capture (Tự động loại bỏ Panel Sticky/Fixed che khuất đề thi)
+// background.js - 100% Thuần Native Chrome Capture (Phân tách chuyên biệt Desktop PC vs Mobile)
 
 console.log('📸 Background service worker started (100% Pure Native Engine)');
 
@@ -140,7 +140,7 @@ async function stitchCaptures(captures, totalWidth, totalHeight, dpr) {
     return `data:image/png;base64,${btoa(binary)}`;
 }
 
-// ==================== BỘ CUỘN DÀI NATIVE TỰ ĐỘNG ẨN STICKY TOP BAR CỦA AZOTA ====================
+// ==================== BỘ CUỘN DÀI NATIVE (BẢO LƯU 100% CƠ CHẾ PC, TỐI ƯU RIÊNG CHO MOBILE) ====================
 
 async function captureScrollNative(tabId, mode = 'third', initialWindowId = null) {
     let originalScrollX = 0, originalScrollY = 0;
@@ -156,6 +156,7 @@ async function captureScrollNative(tabId, mode = 'third', initialWindowId = null
     try {
         const dim = await executeScriptUniversal(tabId, () => {
             const clientWidth = document.documentElement.clientWidth || window.innerWidth;
+            const isMobileDevice = (window.innerWidth <= 768) || /Android|iPhone|iPad|Mobile/i.test(navigator.userAgent);
             
             let maxScrollH = Math.max(
                 document.documentElement.scrollHeight,
@@ -164,13 +165,15 @@ async function captureScrollNative(tabId, mode = 'third', initialWindowId = null
             );
 
             let innerScrollTarget = null;
-            const scrollables = document.querySelectorAll('div, section, main, article, [role="main"]');
-            for (const el of scrollables) {
-                if (el.scrollHeight > maxScrollH && el.clientHeight > 300) {
-                    const ov = window.getComputedStyle(el).overflowY;
-                    if (ov === 'auto' || ov === 'scroll' || ov === 'visible') {
-                        maxScrollH = el.scrollHeight;
-                        innerScrollTarget = true;
+            if (isMobileDevice) {
+                const scrollables = document.querySelectorAll('div, section, main, article, [role="main"]');
+                for (const el of scrollables) {
+                    if (el.scrollHeight > maxScrollH && el.clientHeight > 300) {
+                        const ov = window.getComputedStyle(el).overflowY;
+                        if (ov === 'auto' || ov === 'scroll' || ov === 'visible') {
+                            maxScrollH = el.scrollHeight;
+                            innerScrollTarget = true;
+                        }
                     }
                 }
             }
@@ -183,13 +186,14 @@ async function captureScrollNative(tabId, mode = 'third', initialWindowId = null
                 dpr: window.devicePixelRatio || 1,
                 originalScrollX: window.scrollX || 0,
                 originalScrollY: window.scrollY || 0,
+                isMobile: isMobileDevice,
                 hasInnerScroll: !!innerScrollTarget
             };
         });
 
         if (!dim) throw new Error('Không thể lấy kích thước trang web');
 
-        const { viewportWidth, viewportHeight, totalWidth, totalHeight, dpr } = dim;
+        const { viewportWidth, viewportHeight, totalWidth, totalHeight, dpr, isMobile } = dim;
         originalScrollX = dim.originalScrollX;
         originalScrollY = dim.originalScrollY;
 
@@ -198,10 +202,17 @@ async function captureScrollNative(tabId, mode = 'third', initialWindowId = null
 
         if (mode === 'third') {
             const oneThird = Math.round(totalHeight / 3);
-            const multiScreens = Math.round(viewportHeight * 2.5);
-            targetCaptureHeight = Math.max(multiScreens, oneThird);
-            targetCaptureHeight = Math.min(targetCaptureHeight, totalHeight - startY);
-            targetCaptureHeight = Math.max(targetCaptureHeight, Math.min(viewportHeight, totalHeight));
+            if (isMobile) {
+                // Trên Mobile: Chụp khoảng 2.5x màn hình để bao trọn câu hỏi và các đáp án
+                const multiScreens = Math.round(viewportHeight * 2.5);
+                targetCaptureHeight = Math.max(multiScreens, oneThird);
+                targetCaptureHeight = Math.min(targetCaptureHeight, totalHeight - startY);
+                targetCaptureHeight = Math.max(targetCaptureHeight, Math.min(viewportHeight, totalHeight));
+            } else {
+                // Trên PC: Giữ nguyên chuẩn 1/3 chiều cao trang gốc
+                targetCaptureHeight = Math.min(oneThird, totalHeight - startY);
+                targetCaptureHeight = Math.max(targetCaptureHeight, Math.min(viewportHeight, totalHeight - startY));
+            }
         } else if (mode === 'visible') {
             targetCaptureHeight = Math.min(viewportHeight, totalHeight - startY);
         } else if (mode === 'full') {
@@ -213,56 +224,67 @@ async function captureScrollNative(tabId, mode = 'third', initialWindowId = null
         let iteration = 0;
         const maxIterations = 15;
 
-        // Vòng lặp cuộn và ghép chính xác từng pixel (Tự động ẩn thanh Sticky Top của Azota từ khung thứ 2)
+        // Vòng lặp cuộn và ghép chính xác từng pixel
         while (accumulatedHeight < targetCaptureHeight && iteration < maxIterations) {
             const isFirstSlice = (iteration === 0);
             const targetScrollY = startY + accumulatedHeight;
 
-            // Cuộn đến vị trí chính xác, ẩn sticky bar & đo vị trí thực tế
-            const actualScrollY = await executeScriptUniversal(tabId, (y, isFirst) => {
+            // Cuộn đến vị trí chính xác
+            const actualScrollY = await executeScriptUniversal(tabId, (y, isFirst, isMob) => {
                 window.scrollTo(0, y);
                 document.documentElement.scrollTop = y;
                 document.body.scrollTop = y;
 
-                const scrollables = document.querySelectorAll('div, section, main, article, [role="main"]');
-                for (const el of scrollables) {
-                    if (el.scrollHeight > window.innerHeight && el.clientHeight > 300) {
-                        el.scrollTop = y;
+                if (isMob) {
+                    const scrollables = document.querySelectorAll('div, section, main, article, [role="main"]');
+                    for (const el of scrollables) {
+                        if (el.scrollHeight > window.innerHeight && el.clientHeight > 300) {
+                            el.scrollTop = y;
+                        }
                     }
                 }
 
                 window.dispatchEvent(new Event('scroll'));
 
-                // Tạm ẩn HUD bằng opacity trong tích tắc để chụp
                 document.querySelectorAll('.capture-temp-ui').forEach(el => {
                     el.style.opacity = '0';
                 });
 
-                // TỰ ĐỘNG ẨN TẤT CẢ PANEL / HEADER / STICKY BAR CỦA AZOTA TỪ KHUNG THỨ 2 TRỞ ĐI
                 if (!isFirst) {
-                    const fixedCandidates = document.querySelectorAll('div, header, nav, section, [role="banner"], [role="navigation"]');
-                    for (const el of fixedCandidates) {
-                        if (el.classList.contains('capture-temp-ui') || el.closest('.capture-temp-ui')) continue;
-                        
-                        const style = window.getComputedStyle(el);
-                        const pos = style.position;
-                        if (pos === 'fixed' || pos === 'sticky') {
-                            const rect = el.getBoundingClientRect();
-                            // Nếu là thanh Header trên cùng hoặc nút nổi fixed (chiều cao < 40% màn hình)
-                            if (rect.height > 0 && rect.height < window.innerHeight * 0.4) {
-                                if (!el.dataset.prevVis) {
-                                    el.dataset.prevVis = el.style.visibility || 'visible';
-                                    el.dataset.prevOp = el.style.opacity || '1';
-                                    el.style.visibility = 'hidden';
-                                    el.style.opacity = '0';
+                    if (isMob) {
+                        // CHỈ ÁP DỤNG TRÊN MOBILE: Ẩn thanh header/panel của Azota từ khung 2 trở đi
+                        const fixedCandidates = document.querySelectorAll('div, header, nav, section, [role="banner"], [role="navigation"]');
+                        for (const el of fixedCandidates) {
+                            if (el.classList.contains('capture-temp-ui') || el.closest('.capture-temp-ui')) continue;
+                            
+                            const style = window.getComputedStyle(el);
+                            const pos = style.position;
+                            if (pos === 'fixed' || pos === 'sticky') {
+                                const rect = el.getBoundingClientRect();
+                                if (rect.height > 0 && rect.height < window.innerHeight * 0.4) {
+                                    if (!el.dataset.prevVis) {
+                                        el.dataset.prevVis = el.style.visibility || 'visible';
+                                        el.dataset.prevOp = el.style.opacity || '1';
+                                        el.style.visibility = 'hidden';
+                                        el.style.opacity = '0';
+                                    }
                                 }
                             }
                         }
+                    } else {
+                        // TRÊN PC: Cơ chế Desktop chuẩn
+                        const headers = document.querySelectorAll('header, nav, [role="banner"]');
+                        headers.forEach(el => {
+                            if (!el.dataset.prevVis) {
+                                el.dataset.prevVis = el.style.visibility || 'visible';
+                                el.style.visibility = 'hidden';
+                            }
+                        });
                     }
                 }
 
                 return window.scrollY || window.pageYOffset || document.documentElement.scrollTop || y;
-            }, [targetScrollY, isFirstSlice]);
+            }, [targetScrollY, isFirstSlice, isMobile]);
 
             const currentActualY = (actualScrollY !== null && actualScrollY !== undefined) ? actualScrollY : targetScrollY;
 
@@ -279,7 +301,6 @@ async function captureScrollNative(tabId, mode = 'third', initialWindowId = null
                     sourceY = 0;
                     sliceH = Math.min(viewportHeight, targetCaptureHeight);
                 } else {
-                    // Tính độ lệch giữa vị trí cần lấy và vị trí thực tế của ảnh chụp
                     const neededPageY = startY + accumulatedHeight;
                     sourceY = Math.max(0, neededPageY - currentActualY);
                     
@@ -315,15 +336,17 @@ async function captureScrollNative(tabId, mode = 'third', initialWindowId = null
 
     } finally {
         try {
-            await executeScriptUniversal(tabId, (origX, origY) => {
+            await executeScriptUniversal(tabId, (origX, origY, isMob) => {
                 window.scrollTo(origX, origY);
                 document.documentElement.scrollTop = origY;
                 document.body.scrollTop = origY;
 
-                const scrollables = document.querySelectorAll('div, section, main, article, [role="main"]');
-                for (const el of scrollables) {
-                    if (el.scrollHeight > window.innerHeight && el.clientHeight > 300) {
-                        el.scrollTop = origY;
+                if (isMob) {
+                    const scrollables = document.querySelectorAll('div, section, main, article, [role="main"]');
+                    for (const el of scrollables) {
+                        if (el.scrollHeight > window.innerHeight && el.clientHeight > 300) {
+                            el.scrollTop = origY;
+                        }
                     }
                 }
 
@@ -332,14 +355,13 @@ async function captureScrollNative(tabId, mode = 'third', initialWindowId = null
                     el.style.display = '';
                 });
 
-                // Phục hồi lại toàn bộ panel và header của trang
                 document.querySelectorAll('[data-prev-vis]').forEach(el => {
                     el.style.visibility = el.dataset.prevVis === 'visible' ? '' : el.dataset.prevVis;
-                    el.style.opacity = el.dataset.prevOp === '1' ? '' : el.dataset.prevOp;
+                    if (el.dataset.prevOp) el.style.opacity = el.dataset.prevOp === '1' ? '' : el.dataset.prevOp;
                     delete el.dataset.prevVis;
                     delete el.dataset.prevOp;
                 });
-            }, [originalScrollX, originalScrollY]);
+            }, [originalScrollX, originalScrollY, isMobile]);
         } catch (restoreErr) {
             console.warn('Lỗi restore DOM:', restoreErr);
         }
@@ -815,4 +837,4 @@ api.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return false;
 });
 
-console.log('✅ Background ready with Auto Sticky-Header Suppression Engine!');
+console.log('✅ Background ready with isolated Mobile & PC Engine!');
