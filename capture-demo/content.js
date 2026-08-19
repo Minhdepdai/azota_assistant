@@ -160,6 +160,7 @@ function initOrUpdateHUD() {
             height: 0;
             z-index: 2147483647;
             pointer-events: none;
+            opacity: 1;
         `;
 
         hudShadowRoot = hudHostElement.attachShadow({ mode: 'closed' });
@@ -521,6 +522,11 @@ function showHUDAnswer(answerText, statusText, tokenText = '') {
     initOrUpdateHUD();
     if (!hudContainer || !hudBody) return;
 
+    if (hudHostElement) {
+        hudHostElement.style.opacity = '1';
+        hudHostElement.style.display = '';
+    }
+    hudContainer.style.opacity = '1';
     hudContainer.style.display = 'flex';
     hudContainer.classList.remove('minimized');
 
@@ -622,6 +628,11 @@ function showHUDLoading(statusText, message) {
     initOrUpdateHUD();
     if (!hudContainer || !hudBody) return;
 
+    if (hudHostElement) {
+        hudHostElement.style.opacity = '1';
+        hudHostElement.style.display = '';
+    }
+    hudContainer.style.opacity = '1';
     hudContainer.style.display = 'flex';
     hudContainer.classList.remove('minimized');
 
@@ -666,6 +677,7 @@ function createOrUpdateFloatingButton() {
             user-select: none;
             pointer-events: auto;
             touch-action: manipulation;
+            opacity: 1;
         `;
         btn.innerHTML = '📷';
 
@@ -674,6 +686,9 @@ function createOrUpdateFloatingButton() {
             e.preventDefault();
             triggerCapture('third');
         }, true);
+    } else {
+        btn.style.opacity = '1';
+        btn.style.display = '';
     }
 
     const targetParent = document.fullscreenElement || document.webkitFullscreenElement || document.body || document.documentElement;

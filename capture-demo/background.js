@@ -1,6 +1,6 @@
-// background.js - 100% Thuần Native Chrome Capture (Tự động phục hồi Tab ID & Chống lỗi 'No tab with id')
+// background.js - 100% Thuần Native Chrome Capture (Tự động khôi phục 100% giao diện & Nút Nộp Bài bằng Non-Destructive CSS)
 
-console.log('📸 Background service worker started (100% Pure Native Engine - Self-Healing Tab Resolver)');
+console.log('📸 Background service worker started (100% Pure Native Engine - Safe CSS Restoration)');
 
 const api = (typeof browser !== 'undefined' && browser.runtime) ? browser : chrome;
 
@@ -27,7 +27,6 @@ async function getLiveTabId(providedTabId) {
         } catch (e) {}
     }
     
-    // Tìm tab đang active thực tế trên Lemur / Chrome
     try {
         const activeTabs = await api.tabs.query({ active: true });
         if (activeTabs && activeTabs.length > 0) {
@@ -60,7 +59,6 @@ async function executeScriptUniversal(tabId, func, args = []) {
             return results && results[0] !== undefined ? results[0] : null;
         }
     } catch (err) {
-        // Tự động phục hồi nếu tabId bị stale/thay đổi trên Lemur Browser
         if (err.message && err.message.includes('No tab with id')) {
             const live = await getLiveTabId(null);
             if (live.tabId && live.tabId !== currentId) {
@@ -180,7 +178,7 @@ async function stitchCaptures(captures, totalWidth, totalHeight, dpr) {
     return `data:image/png;base64,${btoa(binary)}`;
 }
 
-// ==================== BỘ CUỘN DÀI NATIVE ====================
+// ==================== BỘ CUỘN DÀI NATIVE (AN TOÀN TUYỆT ĐỐI - KHÔI PHỤC 100% GIAO DIỆN & NÚT NỘP BÀI) ====================
 
 async function captureScrollNative(initialTabId, mode = 'third', initialWindowId = null) {
     let originalScrollX = 0, originalScrollY = 0;
@@ -190,6 +188,21 @@ async function captureScrollNative(initialTabId, mode = 'third', initialWindowId
     let targetWinId = live.windowId || initialWindowId;
 
     try {
+        // Chuẩn bị thẻ style ẩn tạm thời
+        await executeScriptUniversal(currentTabId, () => {
+            if (!document.getElementById('__azota_capture_style__')) {
+                const style = document.createElement('style');
+                style.id = '__azota_capture_style__';
+                style.textContent = `
+                    .capture-hide-during-slice {
+                        opacity: 0 !important;
+                        visibility: hidden !important;
+                    }
+                `;
+                (document.head || document.documentElement).appendChild(style);
+            }
+        });
+
         const dim = await executeScriptUniversal(currentTabId, () => {
             const clientWidth = document.documentElement.clientWidth || window.innerWidth;
             const isMobileDevice = (window.innerWidth <= 768) || /Android|iPhone|iPad|Mobile/i.test(navigator.userAgent);
@@ -278,38 +291,29 @@ async function captureScrollNative(initialTabId, mode = 'third', initialWindowId
 
                 window.dispatchEvent(new Event('scroll'));
 
+                // Ẩn tạm thời HUD trong lúc chụp khung hình
                 document.querySelectorAll('.capture-temp-ui').forEach(el => {
-                    el.style.opacity = '0';
+                    el.classList.add('capture-hide-during-slice');
                 });
 
                 if (!isFirst) {
                     if (isMob) {
+                        // Ẩn tạm thời thanh panel cố định của Azota từ khung thứ 2
                         const fixedCandidates = document.querySelectorAll('div, header, nav, section, [role="banner"], [role="navigation"]');
                         for (const el of fixedCandidates) {
                             if (el.classList.contains('capture-temp-ui') || el.closest('.capture-temp-ui')) continue;
-                            
                             const style = window.getComputedStyle(el);
                             const pos = style.position;
                             if (pos === 'fixed' || pos === 'sticky') {
                                 const rect = el.getBoundingClientRect();
                                 if (rect.height > 0 && rect.height < window.innerHeight * 0.4) {
-                                    if (!el.dataset.prevVis) {
-                                        el.dataset.prevVis = el.style.visibility || 'visible';
-                                        el.dataset.prevOp = el.style.opacity || '1';
-                                        el.style.visibility = 'hidden';
-                                        el.style.opacity = '0';
-                                    }
+                                    el.classList.add('capture-hide-during-slice');
                                 }
                             }
                         }
                     } else {
                         const headers = document.querySelectorAll('header, nav, [role="banner"]');
-                        headers.forEach(el => {
-                            if (!el.dataset.prevVis) {
-                                el.dataset.prevVis = el.style.visibility || 'visible';
-                                el.style.visibility = 'hidden';
-                            }
-                        });
+                        headers.forEach(el => el.classList.add('capture-hide-during-slice'));
                     }
                 }
 
@@ -379,16 +383,17 @@ async function captureScrollNative(initialTabId, mode = 'third', initialWindowId
                     }
                 }
 
+                // XÓA BỎ TOÀN BỘ CLASS ẨN VÀ THẺ STYLE -> KHÔI PHỤC 100% GIAO DIỆN & NÚT NỘP BÀI
+                document.querySelectorAll('.capture-hide-during-slice').forEach(el => {
+                    el.classList.remove('capture-hide-during-slice');
+                });
+                const s = document.getElementById('__azota_capture_style__');
+                if (s) s.remove();
+
+                // Đảm bảo HUD & nút chụp luôn hiển thị đầy đủ
                 document.querySelectorAll('.capture-temp-ui').forEach(el => {
                     el.style.opacity = '1';
                     el.style.display = '';
-                });
-
-                document.querySelectorAll('[data-prev-vis]').forEach(el => {
-                    el.style.visibility = el.dataset.prevVis === 'visible' ? '' : el.dataset.prevVis;
-                    if (el.dataset.prevOp) el.style.opacity = el.dataset.prevOp === '1' ? '' : el.dataset.prevOp;
-                    delete el.dataset.prevVis;
-                    delete el.dataset.prevOp;
                 });
             }, [originalScrollX, originalScrollY, isMobile]);
         } catch (restoreErr) {
@@ -861,4 +866,4 @@ api.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return false;
 });
 
-console.log('✅ Background ready with Self-Healing Tab Resolver!');
+console.log('✅ Background ready with Non-Destructive Safe CSS Restoration!');
