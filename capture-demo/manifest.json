@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "📸 Capture Demo + 🤖 Gemini AI",
-  "version": "1.1",
-  "description": "Chụp màn hình thông minh và xử lý tự động với Google Gemini API",
+  "name": "Azota AI Assistant - Smart Screen Capture & Study Solver",
+  "version": "1.2.0",
+  "description": "Trợ lý học tập thông minh: Chụp màn hình cuộn, phân tích bài tập và đối chiếu đáp án với Google Gemini và OpenAI API.",
   "permissions": [
     "activeTab",
     "storage",
