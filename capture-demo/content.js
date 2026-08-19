@@ -1,6 +1,6 @@
-// content.js - Tương thích hoàn hảo trên Máy tính & Điện thoại (100% Native Chrome Engine)
+// content.js - Tích hợp Bộ chụp Custom DOM Canvas Siêu Nhẹ & Chụp Phần Cứng Hardware Screen
 
-console.log('%c📸 Screen Capture AI HUD (100% Pure Native Engine)', 'color:#3b82f6;font-size:13px;font-weight:600;');
+console.log('%c📸 Screen Capture AI HUD (Pure DOM Canvas + Hardware GPU Engine Active)', 'color:#3b82f6;font-size:13px;font-weight:600;');
 
 const apiBridge = (typeof chrome !== 'undefined' && chrome.runtime) ? chrome : (typeof browser !== 'undefined' ? browser : null);
 
@@ -35,7 +35,131 @@ function isExtensionValid() {
     return apiBridge && !!apiBridge.runtime && !!apiBridge.runtime.id;
 }
 
-// ==================== BỘ RENDER MARKDOWN & TOÁN HỌC ====================
+// ==================== 1. BỘ CHỤP DOM CANVAS THUẦN (ZERO LIBRARIES) ====================
+
+async function captureCustomDOM(mode = 'third') {
+    const target = document.fullscreenElement || document.webkitFullscreenElement || document.body || document.documentElement;
+    const windowW = window.innerWidth;
+    const windowH = window.innerHeight;
+    const scrollY = window.scrollY || window.pageYOffset || document.documentElement.scrollTop || 0;
+    const scrollH = target.scrollHeight || document.documentElement.scrollHeight || windowH;
+
+    let targetH = windowH;
+    if (mode === 'third') {
+        targetH = Math.max(windowH, Math.min(Math.round(scrollH / 3), Math.round(windowH * 2.5)));
+    } else if (mode === 'full') {
+        targetH = scrollH;
+    }
+
+    const dpr = Math.min(window.devicePixelRatio || 1.5, 2);
+
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.round(windowW * dpr);
+    canvas.height = Math.round(targetH * dpr);
+    const ctx = canvas.getContext('2d');
+    ctx.scale(dpr, dpr);
+    ctx.fillStyle = window.getComputedStyle(document.body).backgroundColor || '#ffffff';
+    ctx.fillRect(0, 0, windowW, targetH);
+
+    document.querySelectorAll('.capture-temp-ui').forEach(el => el.style.opacity = '0');
+
+    try {
+        const clone = target.cloneNode(true);
+        clone.querySelectorAll('.capture-temp-ui').forEach(el => el.remove());
+
+        const images = clone.querySelectorAll('img');
+        for (const img of images) {
+            try {
+                if (img.src && !img.src.startsWith('data:')) {
+                    const tempC = document.createElement('canvas');
+                    tempC.width = img.naturalWidth || img.width || 100;
+                    tempC.height = img.naturalHeight || img.height || 100;
+                    const tempCtx = tempC.getContext('2d');
+                    tempCtx.drawImage(img, 0, 0);
+                    img.src = tempC.toDataURL('image/png');
+                }
+            } catch (e) {}
+        }
+
+        const serialized = new XMLSerializer().serializeToString(clone);
+        const svgData = `
+            <svg xmlns="http://www.w3.org/2000/svg" width="${windowW}" height="${targetH}">
+                <foreignObject width="100%" height="100%" y="-${scrollY}">
+                    <div xmlns="http://www.w3.org/1999/xhtml" style="background:${ctx.fillStyle}; color:#000; font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif;">
+                        ${serialized}
+                    </div>
+                </foreignObject>
+            </svg>
+        `;
+
+        const blob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
+        const blobUrl = URL.createObjectURL(blob);
+
+        const img = new Image();
+        const renderedDataUrl = await new Promise((resolve) => {
+            img.onload = () => {
+                ctx.drawImage(img, 0, 0);
+                URL.revokeObjectURL(blobUrl);
+                resolve(canvas.toDataURL('image/jpeg', 0.88));
+            };
+            img.onerror = () => {
+                URL.revokeObjectURL(blobUrl);
+                resolve(null);
+            };
+            img.src = blobUrl;
+        });
+
+        if (renderedDataUrl) return renderedDataUrl;
+
+    } catch (err) {
+        console.warn('Lỗi captureCustomDOM:', err);
+    } finally {
+        document.querySelectorAll('.capture-temp-ui').forEach(el => el.style.opacity = '1');
+    }
+    return null;
+}
+
+// ==================== 2. BỘ CHỤP MÀN HÌNH PHẦN CỨNG GPU (HARDWARE SCREEN CAPTURE) ====================
+
+async function captureHardwareScreen() {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {
+        throw new Error('Trình duyệt chưa hỗ trợ Screen Capture API');
+    }
+
+    document.querySelectorAll('.capture-temp-ui').forEach(el => el.style.opacity = '0');
+
+    let stream = null;
+    try {
+        stream = await navigator.mediaDevices.getDisplayMedia({
+            video: { displaySurface: 'browser' },
+            audio: false
+        });
+
+        const video = document.createElement('video');
+        video.srcObject = stream;
+        video.playsInline = true;
+        await video.play();
+
+        await new Promise(r => setTimeout(r, 120));
+
+        const canvas = document.createElement('canvas');
+        canvas.width = video.videoWidth || window.innerWidth * 2;
+        canvas.height = video.videoHeight || window.innerHeight * 2;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+        stream.getTracks().forEach(t => t.stop());
+        return canvas.toDataURL('image/jpeg', 0.88);
+
+    } catch (e) {
+        if (stream) stream.getTracks().forEach(t => t.stop());
+        throw e;
+    } finally {
+        document.querySelectorAll('.capture-temp-ui').forEach(el => el.style.opacity = '1');
+    }
+}
+
+// ==================== 3. BỘ RENDER MARKDOWN & TOÁN HỌC ====================
 
 function renderMarkdownAndMath(text) {
     if (!text) return '';
@@ -281,41 +405,14 @@ function initOrUpdateHUD() {
                 border-radius: 2px;
             }
 
-            /* Responsive Typography */
-            .md-p {
-                margin: 3px 0 6px 0;
-                line-height: 1.55;
-            }
+            .md-p { margin: 3px 0 6px 0; line-height: 1.55; }
+            .md-bold { color: #fff; font-weight: 700; }
+            .md-em { color: #cbd5e1; }
+            .md-h2, .md-h3, .md-h4 { margin: 8px 0 4px 0; font-weight: 700; color: #fff; }
+            .md-h4 { font-size: 12px; color: #60a5fa; }
+            .md-list { margin: 4px 0 8px 16px; padding: 0; line-height: 1.55; }
+            .md-list li { margin-bottom: 3px; }
 
-            .md-bold {
-                color: #fff;
-                font-weight: 700;
-            }
-
-            .md-em {
-                color: #cbd5e1;
-            }
-
-            .md-h2, .md-h3, .md-h4 {
-                margin: 8px 0 4px 0;
-                font-weight: 700;
-                color: #fff;
-            }
-            .md-h4 {
-                font-size: 12px;
-                color: #60a5fa;
-            }
-
-            .md-list {
-                margin: 4px 0 8px 16px;
-                padding: 0;
-                line-height: 1.55;
-            }
-            .md-list li {
-                margin-bottom: 3px;
-            }
-
-            /* Math Fractions */
             .math-fraction {
                 display: inline-flex;
                 flex-direction: column;
@@ -326,34 +423,11 @@ function initOrUpdateHUD() {
                 line-height: 1.05;
                 font-family: 'Cambria Math', 'Times New Roman', serif;
             }
-            .math-num {
-                border-bottom: 1.5px solid currentColor;
-                padding-bottom: 1px;
-            }
-            .math-den {
-                padding-top: 1px;
-            }
+            .math-num { border-bottom: 1.5px solid currentColor; padding-bottom: 1px; }
+            .math-den { padding-top: 1px; }
+            .math-inline { font-family: 'Cambria Math', 'Times New Roman', serif; font-style: italic; color: #93c5fd; padding: 0 2px; }
+            .math-block { display: flex; justify-content: center; margin: 6px 0; padding: 6px 10px; background: rgba(255, 255, 255, 0.04); border-radius: 6px; font-family: 'Cambria Math', 'Times New Roman', serif; font-size: 13px; color: #60a5fa; }
 
-            .math-inline {
-                font-family: 'Cambria Math', 'Times New Roman', serif;
-                font-style: italic;
-                color: #93c5fd;
-                padding: 0 2px;
-            }
-
-            .math-block {
-                display: flex;
-                justify-content: center;
-                margin: 6px 0;
-                padding: 6px 10px;
-                background: rgba(255, 255, 255, 0.04);
-                border-radius: 6px;
-                font-family: 'Cambria Math', 'Times New Roman', serif;
-                font-size: 13px;
-                color: #60a5fa;
-            }
-
-            /* Action Buttons */
             .hud-action-bar {
                 display: flex;
                 gap: 6px;
@@ -379,10 +453,7 @@ function initOrUpdateHUD() {
                 gap: 4px;
             }
 
-            .hud-btn-dc-prominent:hover {
-                background: #10b981;
-                color: #fff;
-            }
+            .hud-btn-dc-prominent:hover { background: #10b981; color: #fff; }
 
             .hud-btn-copy-prominent {
                 flex: 1;
@@ -401,12 +472,8 @@ function initOrUpdateHUD() {
                 gap: 4px;
             }
 
-            .hud-btn-copy-prominent:hover {
-                background: #334155;
-                color: #fff;
-            }
+            .hud-btn-copy-prominent:hover { background: #334155; color: #fff; }
 
-            /* Double Check Card */
             .hud-dc-card {
                 margin-top: 10px;
                 padding: 10px 12px;
@@ -459,42 +526,15 @@ function initOrUpdateHUD() {
                 flex-shrink: 0;
             }
 
-            @keyframes spin {
-                0% { transform: rotate(0deg); }
-                100% { transform: rotate(360deg); }
-            }
-
-            .minimized .hud-body, .minimized .hud-footer {
-                display: none;
-            }
-            .minimized {
-                width: 180px;
-            }
+            @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+            .minimized .hud-body, .minimized .hud-footer { display: none; }
+            .minimized { width: 180px; }
 
             @media (max-width: 600px) {
-                .hud-card {
-                    top: 16px;
-                    left: 10px;
-                    right: 10px;
-                    width: auto;
-                    max-width: calc(100vw - 20px);
-                    max-height: 68vh;
-                    border-radius: 10px;
-                }
-                .hud-body {
-                    padding: 10px 12px;
-                    max-height: 48vh;
-                    font-size: 12px;
-                }
-                .hud-action-bar {
-                    flex-direction: column;
-                    gap: 5px;
-                }
-                .hud-btn-dc-prominent, .hud-btn-copy-prominent {
-                    width: 100%;
-                    padding: 7px 8px;
-                    font-size: 11px;
-                }
+                .hud-card { top: 16px; left: 10px; right: 10px; width: auto; max-width: calc(100vw - 20px); max-height: 68vh; border-radius: 10px; }
+                .hud-body { padding: 10px 12px; max-height: 48vh; font-size: 12px; }
+                .hud-action-bar { flex-direction: column; gap: 5px; }
+                .hud-btn-dc-prominent, .hud-btn-copy-prominent { width: 100%; padding: 7px 8px; font-size: 11px; }
             }
         `;
         hudShadowRoot.appendChild(style);
@@ -517,7 +557,7 @@ function initOrUpdateHUD() {
             <div class="hud-body" id="hudBody"></div>
             <div class="hud-footer">
                 <span id="hudTokens">Token: 0</span>
-                <span style="font-size: 9.5px; color: #64748b;">Alt+S hoặc click 📷 để chụp</span>
+                <span style="font-size: 9.5px; color: #64748b;">Alt+S hoặc click 📷</span>
             </div>
         `;
 
@@ -562,9 +602,7 @@ function initOrUpdateHUD() {
             hudContainer.style.right = 'auto';
         }
 
-        function endDrag() {
-            isDragging = false;
-        }
+        function endDrag() { isDragging = false; }
 
         hudHeader.addEventListener('mousedown', (e) => {
             if (e.target.tagName === 'BUTTON') return;
@@ -730,21 +768,21 @@ function createOrUpdateFloatingButton() {
         btn = document.createElement('div');
         btn.id = 'capture-floating-btn';
         btn.className = 'capture-temp-ui';
-        btn.title = 'Chụp & phân tích AI';
+        btn.title = 'Chụp DOM Canvas / Nhấn giữ để chụp phần cứng';
         btn.style.cssText = `
             position: fixed;
             bottom: 20px;
             right: 16px;
-            width: 40px;
-            height: 40px;
+            width: 42px;
+            height: 42px;
             border-radius: 50%;
             background: #0f172a;
-            border: 1px solid rgba(255, 255, 255, 0.2);
+            border: 1.5px solid rgba(59, 130, 246, 0.5);
             color: #60a5fa;
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 17px;
+            font-size: 18px;
             cursor: pointer;
             z-index: 2147483640;
             box-shadow: 0 6px 20px rgba(0, 0, 0, 0.6);
@@ -754,6 +792,26 @@ function createOrUpdateFloatingButton() {
             touch-action: manipulation;
         `;
         btn.innerHTML = '📷';
+
+        let pressTimer = null;
+        let isLongPress = false;
+
+        btn.addEventListener('touchstart', () => {
+            isLongPress = false;
+            pressTimer = setTimeout(() => {
+                isLongPress = true;
+                triggerHardwareCapture();
+            }, 800);
+        }, { passive: true });
+
+        btn.addEventListener('touchend', (e) => {
+            if (pressTimer) clearTimeout(pressTimer);
+            if (!isLongPress) {
+                e.stopPropagation();
+                e.preventDefault();
+                triggerCapture('third');
+            }
+        });
 
         btn.addEventListener('click', (e) => {
             e.stopPropagation();
@@ -784,7 +842,7 @@ window.addEventListener('keydown', function(e) {
     }
 }, true);
 
-// Double-tap trên màn hình cảm ứng
+// Double-tap góc màn hình
 window.addEventListener('touchstart', function(event) {
     const now = Date.now();
     const touch = event.touches[0];
@@ -835,7 +893,24 @@ function showClickIndicator(x, y) {
     setTimeout(() => { indicator.remove(); }, 380);
 }
 
-// ==================== TRIGGER CAPTURE & AI (100% NATIVE API) ====================
+// ==================== XỬ LÝ CHỤP ĐA PHƯƠNG THỨC (DOM CANVAS + HARDWARE FALLBACK) ====================
+
+async function triggerHardwareCapture() {
+    if (isProcessing) return;
+    isProcessing = true;
+    showHUDLoading('Đang mở GPU...', 'Đang yêu cầu chụp khung hình phần cứng...');
+
+    try {
+        const dataUrl = await captureHardwareScreen();
+        if (!dataUrl) throw new Error('Không nhận được khung hình phần cứng');
+        await processCapturedImage(dataUrl, 'hardware');
+    } catch (err) {
+        console.warn('Lỗi hardware capture:', err);
+        showHUDLoading('Lỗi', `Lỗi: ${err.message || 'Không thể chụp phần cứng'}`);
+    } finally {
+        isProcessing = false;
+    }
+}
 
 async function triggerCapture(mode = 'third') {
     if (isProcessing) return;
@@ -846,71 +921,50 @@ async function triggerCapture(mode = 'third') {
     }
 
     isProcessing = true;
-    showHUDLoading('Đang chụp...', 'Đang cuộn và chụp khung hình bài tập...');
+    showHUDLoading('Đang chụp...', 'Đang chụp nội dung bài tập...');
     
     try {
-        const response = await new Promise((resolve) => {
-            apiBridge.runtime.sendMessage({
-                type: 'CAPTURE_FULL_PAGE_NATIVE',
-                mode: mode
-            }, (res) => {
-                if (apiBridge.runtime.lastError) {
-                    resolve({ success: false, error: apiBridge.runtime.lastError.message });
-                } else {
-                    resolve(res || { success: false });
-                }
-            });
-        });
+        let dataUrl = null;
 
-        if (!response?.success || !response?.dataUrl) {
-            throw new Error(response?.error || 'Lỗi khi chụp trang bằng Native API');
+        // 1. Thử chụp bằng Native API nếu là Desktop Chrome
+        try {
+            const response = await new Promise((resolve) => {
+                apiBridge.runtime.sendMessage({
+                    type: 'CAPTURE_FULL_PAGE_NATIVE',
+                    mode: mode
+                }, (res) => {
+                    if (apiBridge.runtime.lastError) {
+                        resolve({ success: false, error: apiBridge.runtime.lastError.message });
+                    } else {
+                        resolve(res || { success: false });
+                    }
+                });
+            });
+
+            if (response && response.success && response.dataUrl) {
+                dataUrl = response.dataUrl;
+            }
+        } catch (nativeErr) {
+            console.warn('Native capture failed, fallback to DOM Canvas:', nativeErr);
         }
 
-        const now = new Date();
-        const timestamp = now.toISOString().replace(/[:.]/g, '-');
-        const filename = `capture_${timestamp}.png`;
-        const captureId = 'cap_' + Date.now();
+        // 2. Tự động chuyển sang Bộ chụp DOM Canvas siêu nhẹ nếu Native bị lỗi (Kiwi Browser)
+        if (!dataUrl) {
+            showHUDLoading('Đang chụp...', 'Đang trích xuất khung bài tập qua DOM Canvas...');
+            dataUrl = await captureCustomDOM(mode);
+        }
 
-        currentCaptureData.dataUrl = response.dataUrl;
-        currentCaptureData.captureId = captureId;
-        currentCaptureData.initialAnswer = null;
+        // 3. Nếu vẫn chưa được, mở hộp thoại Chụp Phần Cứng GPU Native
+        if (!dataUrl) {
+            showHUDLoading('Đang chụp...', 'Đang chuyển sang Chụp phần cứng...');
+            dataUrl = await captureHardwareScreen();
+        }
 
-        const result = {
-            id: captureId,
-            image: response.dataUrl,
-            filename: filename,
-            timestamp: now.toISOString(),
-            pageUrl: window.location.href,
-            pageTitle: document.title || 'Untitled',
-            mode: 'native-' + mode,
-            geminiAnswer: null
-        };
+        if (!dataUrl) {
+            throw new Error('Không thể chụp được nội dung trang web. Vui lòng thử lại!');
+        }
 
-        apiBridge.runtime.sendMessage({
-            type: 'NEW_CAPTURE',
-            payload: result
-        });
-
-        showHUDLoading('Đang giải đề...', 'Đã chụp xong, đang gửi dữ liệu cho AI giải bài...');
-
-        apiBridge.runtime.sendMessage({
-            type: 'ANALYZE_WITH_AI',
-            dataUrl: response.dataUrl,
-            captureId: captureId
-        }, (res) => {
-            if (res && res.success) {
-                currentCaptureData.initialAnswer = res.answer;
-                currentCaptureData.aiProvider = res.provider;
-                currentCaptureData.aiModel = res.model;
-
-                const totalTokens = res.usage?.totalTokenCount || 0;
-                const tokenStr = totalTokens > 0 ? `Token: ${totalTokens.toLocaleString('vi-VN')} (${res.provider || 'AI'})` : (res.provider || 'Hoàn tất');
-                
-                showHUDAnswer(res.answer, `Đáp án (${res.provider || 'AI'})`, tokenStr);
-            } else {
-                showHUDLoading('Lỗi', `Lỗi kết nối: ${res?.error || 'Không thể lấy dữ liệu'}`);
-            }
-        });
+        await processCapturedImage(dataUrl, mode);
 
     } catch (error) {
         console.error('Lỗi capture:', error);
@@ -918,6 +972,54 @@ async function triggerCapture(mode = 'third') {
     } finally {
         isProcessing = false;
     }
+}
+
+async function processCapturedImage(dataUrl, mode) {
+    const now = new Date();
+    const timestamp = now.toISOString().replace(/[:.]/g, '-');
+    const filename = `capture_${timestamp}.png`;
+    const captureId = 'cap_' + Date.now();
+
+    currentCaptureData.dataUrl = dataUrl;
+    currentCaptureData.captureId = captureId;
+    currentCaptureData.initialAnswer = null;
+
+    const result = {
+        id: captureId,
+        image: dataUrl,
+        filename: filename,
+        timestamp: now.toISOString(),
+        pageUrl: window.location.href,
+        pageTitle: document.title || 'Untitled',
+        mode: mode,
+        geminiAnswer: null
+    };
+
+    apiBridge.runtime.sendMessage({
+        type: 'NEW_CAPTURE',
+        payload: result
+    });
+
+    showHUDLoading('Đang giải đề...', 'Đã chụp xong, đang gửi dữ liệu cho AI giải bài...');
+
+    apiBridge.runtime.sendMessage({
+        type: 'ANALYZE_WITH_AI',
+        dataUrl: dataUrl,
+        captureId: captureId
+    }, (res) => {
+        if (res && res.success) {
+            currentCaptureData.initialAnswer = res.answer;
+            currentCaptureData.aiProvider = res.provider;
+            currentCaptureData.aiModel = res.model;
+
+            const totalTokens = res.usage?.totalTokenCount || 0;
+            const tokenStr = totalTokens > 0 ? `Token: ${totalTokens.toLocaleString('vi-VN')} (${res.provider || 'AI'})` : (res.provider || 'Hoàn tất');
+            
+            showHUDAnswer(res.answer, `Đáp án (${res.provider || 'AI'})`, tokenStr);
+        } else {
+            showHUDLoading('Lỗi', `Lỗi kết nối: ${res?.error || 'Không thể lấy dữ liệu'}`);
+        }
+    });
 }
 
 if (apiBridge && apiBridge.runtime && apiBridge.runtime.onMessage) {
