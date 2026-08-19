@@ -1,4 +1,4 @@
-// popup.js - Quản lý giao diện Popup tối giản & Hỗ trợ Double Check
+// popup.js - Quản lý giao diện Popup & Hỗ trợ Double Check + Math Renderer
 
 document.addEventListener('DOMContentLoaded', function() {
     const statusBadge = document.getElementById('statusBadge');
@@ -46,13 +46,118 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     });
 
-    // Check valid web URL
     function isValidWebUrl(url) {
         if (!url) return false;
         const invalidPrefixes = ['chrome://', 'chrome-extension://', 'edge://', 'about:', 'view-source:', 'data:', 'javascript:'];
         if (invalidPrefixes.some(p => url.startsWith(p))) return false;
         if (url.includes('chromewebstore.google.com') || url.includes('chrome.google.com/webstore')) return false;
         return true;
+    }
+
+    // ==================== BỘ RENDER TOÁN & MARKDOWN ====================
+
+    function renderMarkdownAndMath(text) {
+        if (!text) return '';
+
+        let html = text.replace(/\\d?frac\{([^{}]+)\}\{([^{}]+)\}/g, (match, num, den) => {
+            return `<span class="math-fraction"><span class="math-num">${num}</span><span class="math-den">${den}</span></span>`;
+        });
+
+        const latexMap = [
+            [/\\triangle/g, '△'],
+            [/\\Rightarrow/g, '⇒'],
+            [/\\Leftarrow/g, '⇐'],
+            [/\\Leftrightarrow/g, '⇔'],
+            [/\\rightarrow/g, '→'],
+            [/\\leftarrow/g, '←'],
+            [/\\cdot/g, '·'],
+            [/\\times/g, '×'],
+            [/\\div/g, '÷'],
+            [/\\pm/g, '±'],
+            [/\\le(q)?\b/g, '≤'],
+            [/\\ge(q)?\b/g, '≥'],
+            [/\\neq/g, '≠'],
+            [/\\approx/g, '≈'],
+            [/\\equiv/g, '≡'],
+            [/\\in\b/g, '∈'],
+            [/\\notin\b/g, '∉'],
+            [/\\cap\b/g, '∩'],
+            [/\\cup\b/g, '∪'],
+            [/\\subset\b/g, '⊂'],
+            [/\\perp\b/g, '⊥'],
+            [/\\parallel\b/g, '∥'],
+            [/\\angle\b/g, '∠'],
+            [/\\pi\b/g, 'π'],
+            [/\\alpha\b/g, 'α'],
+            [/\\beta\b/g, 'β'],
+            [/\\gamma\b/g, 'γ'],
+            [/\\theta\b/g, 'θ'],
+            [/\\lambda\b/g, 'λ'],
+            [/\\Delta\b/g, 'Δ'],
+            [/\\Omega\b/g, 'Ω'],
+            [/\\infty\b/g, '∞'],
+            [/\\sqrt\{([^{}]+)\}/g, '√($1)'],
+            [/\\sqrt\[([^{}]+)\]\{([^{}]+)\}/g, '$1√($2)'],
+            [/\\overline\{([^{}]+)\}/g, '<span style="text-decoration:overline;">$1</span>'],
+            [/\\vec\{([^{}]+)\}/g, '$1⃗']
+        ];
+
+        latexMap.forEach(([regex, replacement]) => {
+            html = html.replace(regex, replacement);
+        });
+
+        html = html.replace(/\^\{([^{}]+)\}/g, '<sup>$1</sup>');
+        html = html.replace(/\^([0-9a-zA-Z+-]+)/g, '<sup>$1</sup>');
+        html = html.replace(/_\{([^{}]+)\}/g, '<sub>$1</sub>');
+        html = html.replace(/_([0-9a-zA-Z+-]+)/g, '<sub>$1</sub>');
+
+        html = html.replace(/\$\$([^\$]+)\$\$/g, '<div class="math-block">$1</div>');
+        html = html.replace(/\$([^\$]+)\$/g, '<span class="math-inline">$1</span>');
+
+        html = html.replace(/^### (.*$)/gim, '<h4 class="md-h4">$1</h4>');
+        html = html.replace(/^## (.*$)/gim, '<h3 class="md-h3">$1</h3>');
+        html = html.replace(/^# (.*$)/gim, '<h2 class="md-h2">$1</h2>');
+
+        html = html.replace(/\*\*(.*?)\*\*/g, '<strong class="md-bold">$1</strong>');
+        html = html.replace(/__(.*?)__/g, '<strong class="md-bold">$1</strong>');
+        html = html.replace(/\*([^\*\n]+)\*/g, '<em class="md-em">$1</em>');
+        html = html.replace(/_([^_\n]+)_/g, '<em class="md-em">$1</em>');
+
+        const lines = html.split('\n');
+        let inList = false;
+        let newLines = [];
+
+        for (let i = 0; i < lines.length; i++) {
+            let line = lines[i];
+            let trimmed = line.trim();
+
+            if (/^[\*\-]\s+(.*)/.test(trimmed)) {
+                let itemContent = trimmed.replace(/^[\*\-]\s+/, '');
+                if (!inList) {
+                    newLines.push('<ul class="md-list">');
+                    inList = true;
+                }
+                newLines.push(`<li>${itemContent}</li>`);
+            } else if (/^\d+\.\s+(.*)/.test(trimmed)) {
+                let itemContent = trimmed.replace(/^\d+\.\s+/, '');
+                if (!inList) {
+                    newLines.push('<ol class="md-list">');
+                    inList = true;
+                }
+                newLines.push(`<li>${itemContent}</li>`);
+            } else {
+                if (inList) {
+                    newLines.push('</ul>');
+                    inList = false;
+                }
+                if (trimmed.length > 0) {
+                    newLines.push(`<p class="md-p">${line}</p>`);
+                }
+            }
+        }
+        if (inList) newLines.push('</ul>');
+
+        return newLines.join('');
     }
 
     // Load History
@@ -107,7 +212,7 @@ document.addEventListener('DOMContentLoaded', function() {
                                 <span>${escapeHtml(item.aiProvider || 'AI Response')}</span>
                                 ${tokenInfoHtml}
                             </div>
-                            <div>${escapeHtml(item.geminiAnswer)}</div>
+                            <div>${renderMarkdownAndMath(item.geminiAnswer)}</div>
                         </div>
                     ` : ''}
 
@@ -116,7 +221,7 @@ document.addEventListener('DOMContentLoaded', function() {
                             <div class="answer-badge" style="color: #34d399;">
                                 <span>KẾT QUẢ SOÁT BÀI (${escapeHtml(item.doubleCheckModel || 'Verified')})</span>
                             </div>
-                            <div style="color: #e2e8f0;">${escapeHtml(item.doubleCheckAnswer)}</div>
+                            <div style="color: #e2e8f0;">${renderMarkdownAndMath(item.doubleCheckAnswer)}</div>
                         </div>
                     ` : ''}
 
@@ -309,7 +414,6 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
 
-    // Clear History
     btnClear.addEventListener('click', function() {
         if (confirm('Bạn có chắc muốn xóa tất cả ảnh chụp trong Cache không?')) {
             chrome.runtime.sendMessage({ type: 'CLEAR_HISTORY' }, () => {

@@ -1,6 +1,6 @@
-// content.js - Floating HUD tối giản, tích hợp nút Double Check trực tiếp dưới phần đáp án
+// content.js - Floating HUD tối giản, hiển thị công thức Toán & Markdown chuẩn đẹp
 
-console.log('%c📸 Screen Capture AI HUD + Double Check Active', 'color:#3b82f6;font-size:13px;font-weight:600;');
+console.log('%c📸 Screen Capture AI HUD + Math Renderer Ready', 'color:#3b82f6;font-size:13px;font-weight:600;');
 
 const CONFIG = {
     clickCount: 2,
@@ -20,7 +20,6 @@ let hudShadowRoot = null;
 let hudContainer = null;
 let hudBody = null;
 
-// Lưu trữ dữ liệu ảnh chụp và đáp án sơ bộ hiện tại
 let currentCaptureData = {
     dataUrl: null,
     initialAnswer: null,
@@ -31,6 +30,125 @@ let currentCaptureData = {
 
 function isExtensionValid() {
     return typeof chrome !== 'undefined' && chrome.runtime && !!chrome.runtime.id;
+}
+
+// ==================== BỘ RENDER MARKDOWN & TOÁN HỌC (MATH RENDERER) ====================
+
+function renderMarkdownAndMath(text) {
+    if (!text) return '';
+
+    // 1. Phân số LaTeX: \dfrac{a}{b} hoặc \frac{a}{b} (kể cả lồng nhau 1 cấp)
+    let html = text.replace(/\\d?frac\{([^{}]+)\}\{([^{}]+)\}/g, (match, num, den) => {
+        return `<span class="math-fraction"><span class="math-num">${num}</span><span class="math-den">${den}</span></span>`;
+    });
+
+    // 2. Ký hiệu toán học & hình học LaTeX
+    const latexMap = [
+        [/\\triangle/g, '△'],
+        [/\\Rightarrow/g, '⇒'],
+        [/\\Leftarrow/g, '⇐'],
+        [/\\Leftrightarrow/g, '⇔'],
+        [/\\rightarrow/g, '→'],
+        [/\\leftarrow/g, '←'],
+        [/\\cdot/g, '·'],
+        [/\\times/g, '×'],
+        [/\\div/g, '÷'],
+        [/\\pm/g, '±'],
+        [/\\le(q)?\b/g, '≤'],
+        [/\\ge(q)?\b/g, '≥'],
+        [/\\neq/g, '≠'],
+        [/\\approx/g, '≈'],
+        [/\\equiv/g, '≡'],
+        [/\\in\b/g, '∈'],
+        [/\\notin\b/g, '∉'],
+        [/\\cap\b/g, '∩'],
+        [/\\cup\b/g, '∪'],
+        [/\\subset\b/g, '⊂'],
+        [/\\perp\b/g, '⊥'],
+        [/\\parallel\b/g, '∥'],
+        [/\\angle\b/g, '∠'],
+        [/\\pi\b/g, 'π'],
+        [/\\alpha\b/g, 'α'],
+        [/\\beta\b/g, 'β'],
+        [/\\gamma\b/g, 'γ'],
+        [/\\theta\b/g, 'θ'],
+        [/\\lambda\b/g, 'λ'],
+        [/\\Delta\b/g, 'Δ'],
+        [/\\Omega\b/g, 'Ω'],
+        [/\\infty\b/g, '∞'],
+        [/\\sqrt\{([^{}]+)\}/g, '√($1)'],
+        [/\\sqrt\[([^{}]+)\]\{([^{}]+)\}/g, '$1√($2)'],
+        [/\\overline\{([^{}]+)\}/g, '<span style="text-decoration:overline;">$1</span>'],
+        [/\\vec\{([^{}]+)\}/g, '$1⃗']
+    ];
+
+    latexMap.forEach(([regex, replacement]) => {
+        html = html.replace(regex, replacement);
+    });
+
+    // 3. Số mũ và chỉ số dưới
+    html = html.replace(/\^\{([^{}]+)\}/g, '<sup>$1</sup>');
+    html = html.replace(/\^([0-9a-zA-Z+-]+)/g, '<sup>$1</sup>');
+    html = html.replace(/_\{([^{}]+)\}/g, '<sub>$1</sub>');
+    html = html.replace(/_([0-9a-zA-Z+-]+)/g, '<sub>$1</sub>');
+
+    // 4. Khối công thức $$...$$ và $...$
+    html = html.replace(/\$\$([^\$]+)\$\$/g, '<div class="math-block">$1</div>');
+    html = html.replace(/\$([^\$]+)\$/g, '<span class="math-inline">$1</span>');
+
+    // 5. Tiêu đề Markdown
+    html = html.replace(/^### (.*$)/gim, '<h4 class="md-h4">$1</h4>');
+    html = html.replace(/^## (.*$)/gim, '<h3 class="md-h3">$1</h3>');
+    html = html.replace(/^# (.*$)/gim, '<h2 class="md-h2">$1</h2>');
+
+    // 6. In đậm & in nghiêng
+    html = html.replace(/\*\*(.*?)\*\*/g, '<strong class="md-bold">$1</strong>');
+    html = html.replace(/__(.*?)__/g, '<strong class="md-bold">$1</strong>');
+    html = html.replace(/\*([^\*\n]+)\*/g, '<em class="md-em">$1</em>');
+    html = html.replace(/_([^_\n]+)_/g, '<em class="md-em">$1</em>');
+
+    // 7. Khối mã
+    html = html.replace(/```([\s\S]*?)```/g, '<pre class="md-code"><code>$1</code></pre>');
+    html = html.replace(/`([^`\n]+)`/g, '<code class="md-inline-code">$1</code>');
+
+    // 8. Danh sách gạch đầu dòng (* item, - item)
+    const lines = html.split('\n');
+    let inList = false;
+    let newLines = [];
+
+    for (let i = 0; i < lines.length; i++) {
+        let line = lines[i];
+        let trimmed = line.trim();
+
+        if (/^[\*\-]\s+(.*)/.test(trimmed)) {
+            let itemContent = trimmed.replace(/^[\*\-]\s+/, '');
+            if (!inList) {
+                newLines.push('<ul class="md-list">');
+                inList = true;
+            }
+            newLines.push(`<li>${itemContent}</li>`);
+        } else if (/^\d+\.\s+(.*)/.test(trimmed)) {
+            let itemContent = trimmed.replace(/^\d+\.\s+/, '');
+            if (!inList) {
+                newLines.push('<ol class="md-list">');
+                inList = true;
+            }
+            newLines.push(`<li>${itemContent}</li>`);
+        } else {
+            if (inList) {
+                newLines.push('</ul>');
+                inList = false;
+            }
+            if (trimmed.length > 0) {
+                newLines.push(`<p class="md-p">${line}</p>`);
+            }
+        }
+    }
+    if (inList) {
+        newLines.push('</ul>');
+    }
+
+    return newLines.join('');
 }
 
 // ==================== TẠO FLOATING HUD (CLOSED SHADOW DOM) ====================
@@ -62,8 +180,8 @@ function initOrUpdateHUD() {
                 position: fixed;
                 top: 50px;
                 right: 24px;
-                width: 420px;
-                max-height: 580px;
+                width: 440px;
+                max-height: 600px;
                 background: rgba(15, 23, 42, 0.96);
                 backdrop-filter: blur(16px);
                 -webkit-backdrop-filter: blur(16px);
@@ -151,12 +269,10 @@ function initOrUpdateHUD() {
             }
 
             .hud-body {
-                padding: 14px;
+                padding: 14px 16px;
                 overflow-y: auto;
-                max-height: 460px;
+                max-height: 480px;
                 line-height: 1.6;
-                white-space: pre-wrap;
-                word-break: break-word;
                 font-size: 13px;
                 color: #f1f5f9;
             }
@@ -169,7 +285,88 @@ function initOrUpdateHUD() {
                 border-radius: 2px;
             }
 
-            /* Hàng nút bấm trực tiếp dưới phần đáp án */
+            /* Typography & Math Styling */
+            .md-p {
+                margin: 4px 0 8px 0;
+                line-height: 1.65;
+            }
+
+            .md-bold {
+                color: #fff;
+                font-weight: 700;
+            }
+
+            .md-em {
+                color: #cbd5e1;
+            }
+
+            .md-h2, .md-h3, .md-h4 {
+                margin: 10px 0 6px 0;
+                font-weight: 700;
+                color: #fff;
+            }
+            .md-h4 {
+                font-size: 13px;
+                color: #60a5fa;
+            }
+
+            .md-list {
+                margin: 6px 0 10px 20px;
+                padding: 0;
+                line-height: 1.65;
+            }
+            .md-list li {
+                margin-bottom: 5px;
+            }
+
+            /* Math Formula Styling */
+            .math-fraction {
+                display: inline-flex;
+                flex-direction: column;
+                vertical-align: middle;
+                text-align: center;
+                padding: 0 3px;
+                font-size: 0.9em;
+                line-height: 1.1;
+                font-family: 'Cambria Math', 'Times New Roman', serif;
+            }
+            .math-num {
+                border-bottom: 1.5px solid currentColor;
+                padding-bottom: 1px;
+            }
+            .math-den {
+                padding-top: 1px;
+            }
+
+            .math-inline {
+                font-family: 'Cambria Math', 'Times New Roman', serif;
+                font-style: italic;
+                color: #93c5fd;
+                padding: 0 2px;
+            }
+
+            .math-block {
+                display: flex;
+                justify-content: center;
+                margin: 8px 0;
+                padding: 8px 12px;
+                background: rgba(255, 255, 255, 0.04);
+                border-radius: 6px;
+                font-family: 'Cambria Math', 'Times New Roman', serif;
+                font-size: 14px;
+                color: #60a5fa;
+            }
+
+            .md-inline-code {
+                background: rgba(255, 255, 255, 0.08);
+                padding: 2px 5px;
+                border-radius: 4px;
+                font-size: 12px;
+                font-family: monospace;
+                color: #fca5a5;
+            }
+
+            /* Action Buttons Bar */
             .hud-action-bar {
                 display: flex;
                 gap: 8px;
@@ -223,9 +420,9 @@ function initOrUpdateHUD() {
                 color: #fff;
             }
 
-            /* Khung hiển thị kết quả Double Check */
+            /* Double Check Result Card */
             .hud-dc-card {
-                margin-top: 12px;
+                margin-top: 14px;
                 padding: 12px 14px;
                 background: rgba(16, 185, 129, 0.08);
                 border: 1px solid rgba(16, 185, 129, 0.3);
@@ -368,7 +565,7 @@ function initOrUpdateHUD() {
     }
 }
 
-// ==================== RENDER ĐÁP ÁN + NÚT DOUBLE CHECK ====================
+// ==================== RENDER ĐÁP ÁN ĐÃ QUA BỘ MATH RENDERER ====================
 
 function showHUDAnswer(answerText, statusText, tokenText = '') {
     initOrUpdateHUD();
@@ -383,9 +580,11 @@ function showHUDAnswer(answerText, statusText, tokenText = '') {
     if (statusEl) statusEl.textContent = statusText;
     if (tokenEl && tokenText) tokenEl.textContent = tokenText;
 
-    // Render nội dung đáp án kèm hàng nút bấm ngay bên dưới
+    // Render qua bộ render Toán học & Markdown
+    const renderedHtml = renderMarkdownAndMath(answerText);
+
     hudBody.innerHTML = `
-        <div class="hud-answer-text">${escapeHtml(answerText)}</div>
+        <div class="hud-answer-content">${renderedHtml}</div>
         <div class="hud-action-bar">
             <button class="hud-btn-dc-prominent" id="btnTriggerDoubleCheck">
                 <span>🔍</span>
@@ -399,7 +598,6 @@ function showHUDAnswer(answerText, statusText, tokenText = '') {
         <div id="dcContainer"></div>
     `;
 
-    // Gắn sự kiện cho nút Double Check
     const btnDC = hudShadowRoot.getElementById('btnTriggerDoubleCheck');
     const btnCopy = hudShadowRoot.getElementById('btnCopyAnswer');
     const dcContainer = hudShadowRoot.getElementById('dcContainer');
@@ -437,7 +635,6 @@ function showHUDAnswer(answerText, statusText, tokenText = '') {
         `;
         dcContainer.scrollIntoView({ behavior: 'smooth' });
 
-        // Gửi cả ảnh cap màn hình gốc + đáp án sơ bộ
         chrome.runtime.sendMessage({
             type: 'PERFORM_DOUBLE_CHECK',
             dataUrl: currentCaptureData.dataUrl,
@@ -448,12 +645,13 @@ function showHUDAnswer(answerText, statusText, tokenText = '') {
             btnDC.innerHTML = `<span>🔄</span><span>Soát lại lần nữa</span>`;
 
             if (res && res.success) {
+                const renderedDCHtml = renderMarkdownAndMath(res.answer);
                 dcContainer.innerHTML = `
                     <div class="hud-dc-card">
                         <div class="hud-dc-header">
                             <span>✅ KẾT QUẢ SOÁT BÀI ĐỘC LẬP (${res.model || res.provider || 'AI Verified'})</span>
                         </div>
-                        <div style="font-size: 13px; line-height: 1.6; color: #f8fafc;">${escapeHtml(res.answer)}</div>
+                        <div style="font-size: 13px; line-height: 1.6; color: #f8fafc;">${renderedDCHtml}</div>
                     </div>
                 `;
                 dcContainer.scrollIntoView({ behavior: 'smooth' });
@@ -487,13 +685,6 @@ function showHUDLoading(statusText, message) {
             <span>${message || 'Đang xử lý dữ liệu...'}</span>
         </div>
     `;
-}
-
-function escapeHtml(text) {
-    if (!text) return '';
-    return text.replace(/[&<>"']/g, function(m) {
-        return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[m];
-    });
 }
 
 // ==================== NÚT NỔI CHỤP MÀN HÌNH ====================
@@ -690,7 +881,6 @@ async function triggerCapture(mode = 'third') {
         const filename = `capture_${timestamp}.png`;
         const captureId = 'cap_' + Date.now();
 
-        // Cập nhật dữ liệu ảnh chụp cho Double Check
         currentCaptureData.dataUrl = response.dataUrl;
         currentCaptureData.captureId = captureId;
         currentCaptureData.initialAnswer = null;
@@ -726,7 +916,6 @@ async function triggerCapture(mode = 'third') {
                 const totalTokens = res.usage?.totalTokenCount || 0;
                 const tokenStr = totalTokens > 0 ? `Token: ${totalTokens.toLocaleString('vi-VN')} (${res.provider || 'AI'})` : (res.provider || 'Hoàn tất');
                 
-                // Hiển thị đáp án kèm nút Soát bài (Double Check) trực tiếp bên dưới!
                 showHUDAnswer(res.answer, `Đáp án (${res.provider || 'AI'})`, tokenStr);
             } else {
                 showHUDLoading('Lỗi', `Lỗi kết nối: ${res?.error || 'Không thể lấy dữ liệu'}`);

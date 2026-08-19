@@ -244,20 +244,63 @@
             margin-bottom: 8px;
         }
 
-        /* Answer Box */
+        /* Answer Box & Math Rendering */
         .answer-box {
             background: var(--bg-input);
             border: 1px solid var(--border);
             border-radius: var(--radius-sm);
-            padding: 10px;
+            padding: 10px 12px;
             margin: 8px 0;
             font-size: 12px;
-            line-height: 1.5;
+            line-height: 1.6;
             color: #f1f5f9;
-            white-space: pre-wrap;
-            word-break: break-word;
-            max-height: 180px;
+            max-height: 220px;
             overflow-y: auto;
+        }
+
+        .math-fraction {
+            display: inline-flex;
+            flex-direction: column;
+            vertical-align: middle;
+            text-align: center;
+            padding: 0 3px;
+            font-size: 0.9em;
+            line-height: 1.1;
+            font-family: 'Cambria Math', 'Times New Roman', serif;
+        }
+        .math-num {
+            border-bottom: 1.5px solid currentColor;
+            padding-bottom: 1px;
+        }
+        .math-den {
+            padding-top: 1px;
+        }
+        .math-inline {
+            font-family: 'Cambria Math', 'Times New Roman', serif;
+            font-style: italic;
+            color: #93c5fd;
+            padding: 0 2px;
+        }
+        .math-block {
+            display: flex;
+            justify-content: center;
+            margin: 6px 0;
+            padding: 6px 10px;
+            background: rgba(255, 255, 255, 0.04);
+            border-radius: 6px;
+            font-family: 'Cambria Math', 'Times New Roman', serif;
+            color: #60a5fa;
+        }
+        .md-list {
+            margin: 4px 0 6px 18px;
+            padding: 0;
+        }
+        .md-list li {
+            margin-bottom: 3px;
+        }
+        .md-bold {
+            color: #fff;
+            font-weight: 700;
         }
 
         .answer-badge {
