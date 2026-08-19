@@ -1,6 +1,6 @@
-// background.js - 100% Thuần Native Chrome Capture (Cuộn dài nhiều khung hình trên cả Kiwi Browser và PC)
+// background.js - 100% Thuần Native Chrome Capture (Thuật toán ghép ảnh Pixel-Perfect không mất chữ)
 
-console.log('📸 Background service worker started (100% Pure Native Long-Scroll Engine)');
+console.log('📸 Background service worker started (100% Pure Native Engine)');
 
 const api = (typeof browser !== 'undefined' && browser.runtime) ? browser : chrome;
 
@@ -40,7 +40,7 @@ async function executeScriptUniversal(tabId, func, args = []) {
     throw new Error('Trình duyệt không hỗ trợ scripting API');
 }
 
-// BỘ CHỤP NATIVE TỰ ĐỘNG NHẬN DIỆN WINDOW ID TRÊN ANDROID/KIWI
+// BỘ CHỤP NATIVE TỰ ĐỘNG NHẬN DIỆN WINDOW ID TRÊN ANDROID / LEMUR / CHROME
 function captureTabUniversal(targetWindowId = null) {
     return new Promise(async (resolve, reject) => {
         const captureFn = (api.tabs && api.tabs.captureVisibleTab) ? api.tabs.captureVisibleTab.bind(api.tabs) : null;
@@ -100,7 +100,7 @@ function captureTabUniversal(targetWindowId = null) {
     });
 }
 
-// Ghép các slice ảnh lại OffscreenCanvas
+// Ghép các slice ảnh lại OffscreenCanvas hoàn hảo không mất chữ hay đường kẻ
 async function stitchCaptures(captures, totalWidth, totalHeight, dpr) {
     const canvasWidth = Math.max(1, Math.round(totalWidth * dpr));
     const canvasHeight = Math.max(1, Math.round(totalHeight * dpr));
@@ -119,19 +119,13 @@ async function stitchCaptures(captures, totalWidth, totalHeight, dpr) {
         const dw = Math.round(totalWidth * dpr);
         const sw = Math.min(bitmap.width, dw);
 
-        if (cap.isLastCrop) {
-            const sy = Math.max(0, Math.round((cap.viewportHeight - cap.sliceHeight) * dpr));
-            const sh = Math.min(bitmap.height - sy, Math.round(cap.sliceHeight * dpr));
-            const dy = Math.round(cap.destY * dpr);
-            const dh = sh;
+        const sy = Math.max(0, Math.round(cap.sourceY * dpr));
+        const sh = Math.min(bitmap.height - sy, Math.round(cap.sliceHeight * dpr));
+        const dy = Math.round(cap.destY * dpr);
+        const dh = sh;
 
+        if (sh > 0) {
             ctx.drawImage(bitmap, 0, sy, sw, sh, 0, dy, dw, dh);
-        } else {
-            const sh = Math.min(bitmap.height, Math.round(cap.sliceHeight * dpr));
-            const dy = Math.round(cap.destY * dpr);
-            const dh = sh;
-
-            ctx.drawImage(bitmap, 0, 0, sw, sh, 0, dy, dw, dh);
         }
     }
 
@@ -146,7 +140,7 @@ async function stitchCaptures(captures, totalWidth, totalHeight, dpr) {
     return `data:image/png;base64,${btoa(binary)}`;
 }
 
-// ==================== BỘ CUỘN DÀI NATIVE THỰC SỰ (LONG MULTI-SLICE SCROLLER) ====================
+// ==================== BỘ CUỘN DÀI NATIVE PIXEL-PERFECT (KHÔNG MẤT NỘI DUNG Ở GIỮA) ====================
 
 async function captureScrollNative(tabId, mode = 'third', initialWindowId = null) {
     let originalScrollX = 0, originalScrollY = 0;
@@ -160,11 +154,9 @@ async function captureScrollNative(tabId, mode = 'third', initialWindowId = null
     } catch (e) {}
 
     try {
-        // Thu thập thông số kích thước và tìm khung cuộn thực tế (hỗ trợ cả Azota container cuộn riêng)
         const dim = await executeScriptUniversal(tabId, () => {
             const clientWidth = document.documentElement.clientWidth || window.innerWidth;
             
-            // Tìm phần tử cuộn lớn nhất trong trang (dành cho app single-page/Azota)
             let maxScrollH = Math.max(
                 document.documentElement.scrollHeight,
                 document.body.scrollHeight,
@@ -204,11 +196,9 @@ async function captureScrollNative(tabId, mode = 'third', initialWindowId = null
         let startY = originalScrollY;
         let targetCaptureHeight = totalHeight;
 
-        // Tính toán độ dài cuộn thực sự theo ý muốn của người dùng
         if (mode === 'third') {
-            // Chụp ít nhất 2 đến 3 màn hình cuộn để bao quát toàn bộ câu hỏi và các đáp án A B C D
             const oneThird = Math.round(totalHeight / 3);
-            const multiScreens = Math.round(viewportHeight * 2.8);
+            const multiScreens = Math.round(viewportHeight * 2.5);
             targetCaptureHeight = Math.max(multiScreens, oneThird);
             targetCaptureHeight = Math.min(targetCaptureHeight, totalHeight - startY);
             targetCaptureHeight = Math.max(targetCaptureHeight, Math.min(viewportHeight, totalHeight));
@@ -219,33 +209,21 @@ async function captureScrollNative(tabId, mode = 'third', initialWindowId = null
         }
 
         const captures = [];
-        let currentY = startY;
         let accumulatedHeight = 0;
+        let iteration = 0;
+        const maxIterations = 15;
 
-        // Tiến hành chụp cuộn từng khung hình và ghép lại
-        while (accumulatedHeight < targetCaptureHeight) {
-            const isFirstSlice = (accumulatedHeight === 0);
-            const remainingHeight = targetCaptureHeight - accumulatedHeight;
+        // Vòng lặp cuộn và ghép chính xác từng pixel (Pixel-Perfect Seam Stitching)
+        while (accumulatedHeight < targetCaptureHeight && iteration < maxIterations) {
+            const isFirstSlice = (iteration === 0);
+            const targetScrollY = startY + accumulatedHeight;
 
-            let scrollY = currentY;
-            let isLastCrop = false;
-            let sliceHeight = viewportHeight;
-
-            if (remainingHeight <= viewportHeight) {
-                sliceHeight = remainingHeight;
-                if (!isFirstSlice) {
-                    isLastCrop = true;
-                    scrollY = Math.max(0, startY + targetCaptureHeight - viewportHeight);
-                }
-            }
-
-            // Thực hiện cuộn trên trang
-            await executeScriptUniversal(tabId, (y, isFirst) => {
+            // Cuộn đến vị trí chính xác và đo vị trí thực tế mà trình duyệt dừng lại
+            const actualScrollY = await executeScriptUniversal(tabId, (y, isFirst) => {
                 window.scrollTo(0, y);
                 document.documentElement.scrollTop = y;
                 document.body.scrollTop = y;
 
-                // Cuộn cả container bên trong nếu có
                 const scrollables = document.querySelectorAll('div, section, main, article, [role="main"]');
                 for (const el of scrollables) {
                     if (el.scrollHeight > window.innerHeight && el.clientHeight > 300) {
@@ -255,12 +233,10 @@ async function captureScrollNative(tabId, mode = 'third', initialWindowId = null
 
                 window.dispatchEvent(new Event('scroll'));
 
-                // Tạm ẩn HUD bằng opacity trong tích tắc để chụp
                 document.querySelectorAll('.capture-temp-ui').forEach(el => {
                     el.style.opacity = '0';
                 });
 
-                // Chỉ ẩn tạm header/nav nhỏ, không ẩn container bài tập
                 const headers = document.querySelectorAll('header, nav, [role="banner"]');
                 headers.forEach(el => {
                     if (!isFirst) {
@@ -268,44 +244,60 @@ async function captureScrollNative(tabId, mode = 'third', initialWindowId = null
                         el.style.visibility = 'hidden';
                     }
                 });
-            }, [scrollY, isFirstSlice]);
+
+                return window.scrollY || window.pageYOffset || document.documentElement.scrollTop || y;
+            }, [targetScrollY, isFirstSlice]);
+
+            const currentActualY = (actualScrollY !== null && actualScrollY !== undefined) ? actualScrollY : targetScrollY;
 
             // Chờ GPU render lại khung hình
-            await new Promise(r => setTimeout(r, 280));
+            await new Promise(r => setTimeout(r, 260));
 
             const dataUrl = await captureTabUniversal(targetWinId);
 
             if (dataUrl) {
-                captures.push({
-                    dataUrl,
-                    destY: accumulatedHeight,
-                    viewportHeight,
-                    sliceHeight,
-                    isLastCrop
-                });
+                let sourceY = 0;
+                let sliceH = viewportHeight;
+
+                if (isFirstSlice) {
+                    sourceY = 0;
+                    sliceH = Math.min(viewportHeight, targetCaptureHeight);
+                } else {
+                    // Tính độ lệch giữa vị trí cần lấy và vị trí thực tế của ảnh chụp
+                    const neededPageY = startY + accumulatedHeight;
+                    sourceY = Math.max(0, neededPageY - currentActualY);
+                    
+                    const remainingH = targetCaptureHeight - accumulatedHeight;
+                    sliceH = Math.min(viewportHeight - sourceY, remainingH);
+                }
+
+                if (sliceH > 0) {
+                    captures.push({
+                        dataUrl,
+                        sourceY,
+                        destY: accumulatedHeight,
+                        sliceHeight: sliceH
+                    });
+                    accumulatedHeight += sliceH;
+                } else {
+                    break;
+                }
             }
 
-            accumulatedHeight += sliceHeight;
-            currentY += viewportHeight;
-
-            if (isLastCrop || accumulatedHeight >= targetCaptureHeight) {
-                break;
-            }
+            iteration++;
         }
 
         if (captures.length === 0) {
             throw new Error('Không thể chụp được khung hình nào');
         }
 
-        if (captures.length === 1) {
+        if (captures.length === 1 && captures[0].sourceY === 0 && captures[0].sliceHeight === viewportHeight) {
             return captures[0].dataUrl;
         }
 
-        // Ghép toàn bộ các lát cắt thành 1 bức ảnh dài hoàn chỉnh
-        return await stitchCaptures(captures, totalWidth, targetCaptureHeight, dpr);
+        return await stitchCaptures(captures, totalWidth, accumulatedHeight, dpr);
 
     } finally {
-        // Luôn luôn phục hồi lại vị trí cuộn và giao diện trang
         try {
             await executeScriptUniversal(tabId, (origX, origY) => {
                 window.scrollTo(origX, origY);
@@ -806,4 +798,4 @@ api.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return false;
 });
 
-console.log('✅ Background ready with 100% Pure Native Long-Scroll Engine!');
+console.log('✅ Background ready with Pixel-Perfect Native Stitching Engine!');
