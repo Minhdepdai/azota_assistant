@@ -1,6 +1,6 @@
-// background.js - 100% Thuần Native Chrome Capture (Tự động khôi phục 100% giao diện & Nút Nộp Bài bằng Non-Destructive CSS)
+// background.js - 100% Thuần Native Chrome Capture (Thuật toán Header Crop-Stitch: Giữ nguyên 100% DOM gốc)
 
-console.log('📸 Background service worker started (100% Pure Native Engine - Safe CSS Restoration)');
+console.log('📸 Background service worker started (100% Pure Native Engine - Header Crop-Stitch Architecture)');
 
 const api = (typeof browser !== 'undefined' && browser.runtime) ? browser : chrome;
 
@@ -178,7 +178,7 @@ async function stitchCaptures(captures, totalWidth, totalHeight, dpr) {
     return `data:image/png;base64,${btoa(binary)}`;
 }
 
-// ==================== BỘ CUỘN DÀI NATIVE (AN TOÀN TUYỆT ĐỐI - KHÔI PHỤC 100% GIAO DIỆN & NÚT NỘP BÀI) ====================
+// ==================== BỘ CUỘN DÀI NATIVE (HEADER CROP-STITCH: KHÔNG CHẠM VÀO DOM CỦA AZOTA) ====================
 
 async function captureScrollNative(initialTabId, mode = 'third', initialWindowId = null) {
     let originalScrollX = 0, originalScrollY = 0;
@@ -188,21 +188,6 @@ async function captureScrollNative(initialTabId, mode = 'third', initialWindowId
     let targetWinId = live.windowId || initialWindowId;
 
     try {
-        // Chuẩn bị thẻ style ẩn tạm thời
-        await executeScriptUniversal(currentTabId, () => {
-            if (!document.getElementById('__azota_capture_style__')) {
-                const style = document.createElement('style');
-                style.id = '__azota_capture_style__';
-                style.textContent = `
-                    .capture-hide-during-slice {
-                        opacity: 0 !important;
-                        visibility: hidden !important;
-                    }
-                `;
-                (document.head || document.documentElement).appendChild(style);
-            }
-        });
-
         const dim = await executeScriptUniversal(currentTabId, () => {
             const clientWidth = document.documentElement.clientWidth || window.innerWidth;
             const isMobileDevice = (window.innerWidth <= 768) || /Android|iPhone|iPad|Mobile/i.test(navigator.userAgent);
@@ -227,6 +212,25 @@ async function captureScrollNative(initialTabId, mode = 'third', initialWindowId
                 }
             }
 
+            // Đo chiều cao thực tế của thanh Header cố định trên đỉnh màn hình (Azota Header)
+            let detectedHeaderH = 0;
+            if (isMobileDevice) {
+                const headerCandidates = document.querySelectorAll('div, header, nav, section, [role="banner"], [role="navigation"]');
+                for (const el of headerCandidates) {
+                    if (el.classList.contains('capture-temp-ui') || el.closest('.capture-temp-ui')) continue;
+                    const style = window.getComputedStyle(el);
+                    const pos = style.position;
+                    if (pos === 'fixed' || pos === 'sticky') {
+                        const rect = el.getBoundingClientRect();
+                        if (rect.top <= 10 && rect.height > 15 && rect.height < window.innerHeight * 0.35) {
+                            if (rect.height > detectedHeaderH) {
+                                detectedHeaderH = rect.height;
+                            }
+                        }
+                    }
+                }
+            }
+
             return {
                 viewportWidth: window.innerWidth,
                 viewportHeight: window.innerHeight,
@@ -236,13 +240,14 @@ async function captureScrollNative(initialTabId, mode = 'third', initialWindowId
                 originalScrollX: window.scrollX || 0,
                 originalScrollY: window.scrollY || 0,
                 isMobile: isMobileDevice,
-                hasInnerScroll: !!innerScrollTarget
+                hasInnerScroll: !!innerScrollTarget,
+                stickyHeaderH: Math.round(detectedHeaderH)
             };
         });
 
         if (!dim) throw new Error('Không thể lấy kích thước trang web');
 
-        const { viewportWidth, viewportHeight, totalWidth, totalHeight, dpr, isMobile } = dim;
+        const { viewportWidth, viewportHeight, totalWidth, totalHeight, dpr, isMobile, stickyHeaderH } = dim;
         originalScrollX = dim.originalScrollX;
         originalScrollY = dim.originalScrollY;
 
@@ -271,11 +276,16 @@ async function captureScrollNative(initialTabId, mode = 'third', initialWindowId
         let iteration = 0;
         const maxIterations = 15;
 
+        // Chiều cao Header cố định cần cắt bỏ trong các lát cắt tiếp theo (chỉ áp dụng trên mobile nếu có header)
+        const headerOffset = (isMobile && stickyHeaderH > 15) ? stickyHeaderH : 0;
+        const effectiveSliceH = Math.max(100, viewportHeight - headerOffset);
+        let currentScrollY = startY;
+
         while (accumulatedHeight < targetCaptureHeight && iteration < maxIterations) {
             const isFirstSlice = (iteration === 0);
-            const targetScrollY = startY + accumulatedHeight;
 
-            const actualScrollY = await executeScriptUniversal(currentTabId, (y, isFirst, isMob) => {
+            // Thực hiện cuộn trang (TUYỆT ĐỐI KHÔNG CHẠM VÀO DOM CỦA AZOTA)
+            await executeScriptUniversal(currentTabId, (y, isMob) => {
                 window.scrollTo(0, y);
                 document.documentElement.scrollTop = y;
                 document.body.scrollTop = y;
@@ -291,66 +301,45 @@ async function captureScrollNative(initialTabId, mode = 'third', initialWindowId
 
                 window.dispatchEvent(new Event('scroll'));
 
-                // Ẩn tạm thời HUD trong lúc chụp khung hình
+                // Chỉ tạm ẩn HUD & Camera của extension trong tích tắc
                 document.querySelectorAll('.capture-temp-ui').forEach(el => {
-                    el.classList.add('capture-hide-during-slice');
+                    el.style.opacity = '0';
                 });
-
-                if (!isFirst) {
-                    if (isMob) {
-                        // Ẩn tạm thời thanh panel cố định của Azota từ khung thứ 2
-                        const fixedCandidates = document.querySelectorAll('div, header, nav, section, [role="banner"], [role="navigation"]');
-                        for (const el of fixedCandidates) {
-                            if (el.classList.contains('capture-temp-ui') || el.closest('.capture-temp-ui')) continue;
-                            const style = window.getComputedStyle(el);
-                            const pos = style.position;
-                            if (pos === 'fixed' || pos === 'sticky') {
-                                const rect = el.getBoundingClientRect();
-                                if (rect.height > 0 && rect.height < window.innerHeight * 0.4) {
-                                    el.classList.add('capture-hide-during-slice');
-                                }
-                            }
-                        }
-                    } else {
-                        const headers = document.querySelectorAll('header, nav, [role="banner"]');
-                        headers.forEach(el => el.classList.add('capture-hide-during-slice'));
-                    }
-                }
-
-                return window.scrollY || window.pageYOffset || document.documentElement.scrollTop || y;
-            }, [targetScrollY, isFirstSlice, isMobile]);
-
-            const currentActualY = (actualScrollY !== null && actualScrollY !== undefined) ? actualScrollY : targetScrollY;
+            }, [currentScrollY, isMobile]);
 
             await new Promise(r => setTimeout(r, 260));
 
             const dataUrl = await captureTabUniversal(targetWinId);
 
             if (dataUrl) {
-                let sourceY = 0;
-                let sliceH = viewportHeight;
-
                 if (isFirstSlice) {
-                    sourceY = 0;
-                    sliceH = Math.min(viewportHeight, targetCaptureHeight);
-                } else {
-                    const neededPageY = startY + accumulatedHeight;
-                    sourceY = Math.max(0, neededPageY - currentActualY);
-                    
-                    const remainingH = targetCaptureHeight - accumulatedHeight;
-                    sliceH = Math.min(viewportHeight - sourceY, remainingH);
-                }
-
-                if (sliceH > 0) {
+                    // Khung hình 1: Lấy toàn bộ từ đỉnh (bao gồm tiêu đề đầu trang)
+                    const sliceH = Math.min(viewportHeight, targetCaptureHeight);
                     captures.push({
                         dataUrl,
-                        sourceY,
-                        destY: accumulatedHeight,
+                        sourceY: 0,
+                        destY: 0,
                         sliceHeight: sliceH
                     });
                     accumulatedHeight += sliceH;
+                    currentScrollY = startY + effectiveSliceH;
                 } else {
-                    break;
+                    // Khung hình 2, 3...: TỰ ĐỘNG CẮT BỎ PHẦN HEADER TRÊN ĐỈNH (sourceY = headerOffset)
+                    const remaining = targetCaptureHeight - accumulatedHeight;
+                    const sliceH = Math.min(effectiveSliceH, remaining);
+
+                    if (sliceH > 0) {
+                        captures.push({
+                            dataUrl,
+                            sourceY: headerOffset,
+                            destY: accumulatedHeight,
+                            sliceHeight: sliceH
+                        });
+                        accumulatedHeight += sliceH;
+                        currentScrollY += sliceH;
+                    } else {
+                        break;
+                    }
                 }
             }
 
@@ -383,14 +372,7 @@ async function captureScrollNative(initialTabId, mode = 'third', initialWindowId
                     }
                 }
 
-                // XÓA BỎ TOÀN BỘ CLASS ẨN VÀ THẺ STYLE -> KHÔI PHỤC 100% GIAO DIỆN & NÚT NỘP BÀI
-                document.querySelectorAll('.capture-hide-during-slice').forEach(el => {
-                    el.classList.remove('capture-hide-during-slice');
-                });
-                const s = document.getElementById('__azota_capture_style__');
-                if (s) s.remove();
-
-                // Đảm bảo HUD & nút chụp luôn hiển thị đầy đủ
+                // Khôi phục HUD & camera button
                 document.querySelectorAll('.capture-temp-ui').forEach(el => {
                     el.style.opacity = '1';
                     el.style.display = '';
@@ -866,4 +848,4 @@ api.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return false;
 });
 
-console.log('✅ Background ready with Non-Destructive Safe CSS Restoration!');
+console.log('✅ Background ready with Header Crop-Stitch Engine (Zero DOM Modification)!');
