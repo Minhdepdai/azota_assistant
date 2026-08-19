@@ -1,6 +1,6 @@
-// content.js - Tương thích hoàn hảo trên Máy tính & Điện thoại (Firefox / Chrome Mobile)
+// content.js - Tương thích hoàn hảo trên Máy tính & Điện thoại (Kiwi / Chrome / Firefox)
 
-console.log('%c📸 Screen Capture AI HUD (Mobile & Desktop Responsive)', 'color:#3b82f6;font-size:13px;font-weight:600;');
+console.log('%c📸 Screen Capture AI HUD (Dual Engine: Native + DOM Canvas Fallback)', 'color:#3b82f6;font-size:13px;font-weight:600;');
 
 const apiBridge = (typeof chrome !== 'undefined' && chrome.runtime) ? chrome : (typeof browser !== 'undefined' ? browser : null);
 
@@ -144,10 +144,54 @@ function renderMarkdownAndMath(text) {
     return newLines.join('');
 }
 
-// ==================== TẠO FLOATING HUD (TƯƠNG THÍCH MỌI KÍCH THƯỚC MÀN HÌNH) ====================
+// ==================== BỘ CHỤP DOM CANVAS DỰ PHÒNG CHO KIWI FULLSCREEN ====================
+
+async function captureWithDOMFallback(mode = 'third') {
+    document.querySelectorAll('.capture-temp-ui').forEach(el => {
+        el.style.opacity = '0';
+    });
+
+    try {
+        if (typeof html2canvas === 'function') {
+            const targetEl = document.fullscreenElement || document.webkitFullscreenElement || document.body || document.documentElement;
+            const scrollY = window.scrollY || window.pageYOffset || 0;
+            const windowH = window.innerHeight;
+            const scrollH = targetEl.scrollHeight || document.documentElement.scrollHeight;
+            
+            let captureH = windowH;
+            if (mode === 'third') {
+                captureH = Math.max(windowH, Math.min(Math.round(scrollH / 3), windowH * 2));
+            }
+
+            const canvas = await html2canvas(targetEl, {
+                useCORS: true,
+                allowTaint: true,
+                logging: false,
+                scale: Math.min(window.devicePixelRatio || 1.5, 2),
+                y: scrollY,
+                height: captureH,
+                windowHeight: captureH,
+                ignoreElements: (el) => {
+                    return el.classList && el.classList.contains('capture-temp-ui');
+                }
+            });
+
+            return canvas.toDataURL('image/jpeg', 0.88);
+        }
+    } catch (e) {
+        console.warn('Lỗi html2canvas fallback:', e);
+    } finally {
+        document.querySelectorAll('.capture-temp-ui').forEach(el => {
+            el.style.opacity = '1';
+        });
+    }
+    return null;
+}
+
+// ==================== TẠO FLOATING HUD (CLOSED SHADOW DOM) ====================
 
 function initOrUpdateHUD() {
-    const parent = document.fullscreenElement || document.body || document.documentElement;
+    const parent = document.fullscreenElement || document.webkitFullscreenElement || document.body || document.documentElement;
 
     if (!hudHostElement) {
         hudHostElement = document.createElement('div');
@@ -171,8 +215,8 @@ function initOrUpdateHUD() {
             }
             .hud-card {
                 position: fixed;
-                top: 30px;
-                right: 16px;
+                top: 24px;
+                right: 14px;
                 width: min(92vw, 360px);
                 max-width: calc(100vw - 20px);
                 max-height: 75vh;
@@ -471,7 +515,6 @@ function initOrUpdateHUD() {
                 width: 180px;
             }
 
-            /* TỐI ƯU HÓA ĐẶC BIỆT CHO MÀN HÌNH ĐIỆN THOẠI (< 600px) */
             @media (max-width: 600px) {
                 .hud-card {
                     top: 16px;
@@ -540,7 +583,7 @@ function initOrUpdateHUD() {
             btnMinimize.textContent = hudContainer.classList.contains('minimized') ? '◻' : '━';
         });
 
-        // HỖ TRỢ KÉO THẢ TRÊN CẢ CHUỘT (DESKTOP) VÀ CẢM ỨNG (TOUCH / FIREFOX MOBILE)
+        // HỖ TRỢ KÉO THẢ TRÊN CẢ CHUỘT VÀ CẢM ỨNG
         let isDragging = false;
         let startX, startY, initialLeft, initialTop;
 
@@ -568,7 +611,6 @@ function initOrUpdateHUD() {
             isDragging = false;
         }
 
-        // Mouse events
         hudHeader.addEventListener('mousedown', (e) => {
             if (e.target.tagName === 'BUTTON') return;
             startDrag(e.clientX, e.clientY);
@@ -583,7 +625,6 @@ function initOrUpdateHUD() {
             window.addEventListener('mouseup', onMouseUp);
         });
 
-        // Touch events for Mobile (Firefox Android)
         hudHeader.addEventListener('touchstart', (e) => {
             if (e.target.tagName === 'BUTTON') return;
             const touch = e.touches[0];
@@ -594,7 +635,7 @@ function initOrUpdateHUD() {
             if (!isDragging) return;
             const touch = e.touches[0];
             moveDrag(touch.clientX, touch.clientY);
-            e.preventDefault(); // Ngăn cuộn trang web khi đang kéo bảng HUD trên điện thoại
+            e.preventDefault();
         }, { passive: false });
 
         hudHeader.addEventListener('touchend', endDrag);
@@ -726,7 +767,7 @@ function showHUDLoading(statusText, message) {
     `;
 }
 
-// ==================== NÚT NỔI CHỤP MÀN HÌNH (MOBILE & DESKTOP) ====================
+// ==================== NÚT NỔI CHỤP MÀN HÌNH ====================
 
 function createOrUpdateFloatingButton() {
     let btn = document.getElementById('capture-floating-btn');
@@ -734,7 +775,7 @@ function createOrUpdateFloatingButton() {
         btn = document.createElement('div');
         btn.id = 'capture-floating-btn';
         btn.className = 'capture-temp-ui';
-        btn.title = 'Chụp 1/3 trang & phân tích AI';
+        btn.title = 'Chụp & phân tích AI';
         btn.style.cssText = `
             position: fixed;
             bottom: 20px;
@@ -766,7 +807,7 @@ function createOrUpdateFloatingButton() {
         }, true);
     }
 
-    const targetParent = document.fullscreenElement || document.body || document.documentElement;
+    const targetParent = document.fullscreenElement || document.webkitFullscreenElement || document.body || document.documentElement;
     if (btn.parentElement !== targetParent) {
         targetParent.appendChild(btn);
     }
@@ -828,7 +869,7 @@ function showClickIndicator(x, y) {
         transition: all 0.35s ease-out;
     `;
     
-    const parent = document.fullscreenElement || document.body || document.documentElement;
+    const parent = document.fullscreenElement || document.webkitFullscreenElement || document.body || document.documentElement;
     parent.appendChild(indicator);
     
     setTimeout(() => {
@@ -839,7 +880,7 @@ function showClickIndicator(x, y) {
     setTimeout(() => { indicator.remove(); }, 380);
 }
 
-// ==================== TRIGGER CAPTURE & AI ====================
+// ==================== TRIGGER CAPTURE & AI (TỰ ĐỘNG CHUYỂN DOM CANVAS NẾU NATIVE LỖI) ====================
 
 async function triggerCapture(mode = 'third') {
     if (isProcessing) return;
@@ -850,25 +891,42 @@ async function triggerCapture(mode = 'third') {
     }
 
     isProcessing = true;
-    showHUDLoading('Đang chụp...', 'Đang cuộn và chụp khung hình trang web...');
+    showHUDLoading('Đang chụp...', 'Đang chụp nội dung bài tập...');
     
     try {
-        const response = await new Promise((resolve, reject) => {
-            try {
+        let dataUrl = null;
+
+        // 1. Thử chụp bằng Native API
+        try {
+            const response = await new Promise((resolve) => {
                 apiBridge.runtime.sendMessage({
                     type: 'CAPTURE_FULL_PAGE_NATIVE',
                     mode: mode
                 }, (res) => {
-                    if (apiBridge.runtime.lastError) reject(new Error(apiBridge.runtime.lastError.message));
-                    else resolve(res);
+                    if (apiBridge.runtime.lastError) {
+                        resolve({ success: false, error: apiBridge.runtime.lastError.message });
+                    } else {
+                        resolve(res || { success: false });
+                    }
                 });
-            } catch (err) {
-                reject(err);
-            }
-        });
+            });
 
-        if (!response?.success || !response?.dataUrl) {
-            throw new Error(response?.error || 'Lỗi khi chụp trang');
+            if (response && response.success && response.dataUrl) {
+                dataUrl = response.dataUrl;
+            }
+        } catch (nativeErr) {
+            console.warn('Native capture failed:', nativeErr);
+        }
+
+        // 2. Nếu Native Capture bị lỗi "No active web contents to capture" (đặc trưng của Kiwi Mobile Fullscreen)
+        // -> Tự động kích hoạt bộ chụp Canvas nội trang siêu tốc!
+        if (!dataUrl) {
+            showHUDLoading('Đang chụp...', 'Đang chụp qua bộ xử lý Canvas...');
+            dataUrl = await captureWithDOMFallback(mode);
+        }
+
+        if (!dataUrl) {
+            throw new Error('Không thể chụp được nội dung trang web. Vui lòng thử lại!');
         }
 
         const now = new Date();
@@ -876,13 +934,13 @@ async function triggerCapture(mode = 'third') {
         const filename = `capture_${timestamp}.png`;
         const captureId = 'cap_' + Date.now();
 
-        currentCaptureData.dataUrl = response.dataUrl;
+        currentCaptureData.dataUrl = dataUrl;
         currentCaptureData.captureId = captureId;
         currentCaptureData.initialAnswer = null;
 
         const result = {
             id: captureId,
-            image: response.dataUrl,
+            image: dataUrl,
             filename: filename,
             timestamp: now.toISOString(),
             pageUrl: window.location.href,
@@ -900,7 +958,7 @@ async function triggerCapture(mode = 'third') {
 
         apiBridge.runtime.sendMessage({
             type: 'ANALYZE_WITH_AI',
-            dataUrl: response.dataUrl,
+            dataUrl: dataUrl,
             captureId: captureId
         }, (res) => {
             if (res && res.success) {
@@ -919,11 +977,7 @@ async function triggerCapture(mode = 'third') {
 
     } catch (error) {
         console.error('Lỗi capture:', error);
-        if (error.message && error.message.includes('Extension context invalidated')) {
-            alert('Tiện ích mở rộng vừa được cập nhật. Vui lòng F5 tải lại trang!');
-        } else {
-            showHUDLoading('Lỗi', `Lỗi: ${error.message || 'Không thể chụp'}`);
-        }
+        showHUDLoading('Lỗi', `Lỗi: ${error.message || 'Không thể chụp'}`);
     } finally {
         isProcessing = false;
     }
