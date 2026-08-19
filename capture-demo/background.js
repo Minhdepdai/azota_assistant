@@ -512,7 +512,6 @@ async function performDoubleCheck(imageDataUrl, initialAnswer) {
         }
     }
 
-    // Nếu chọn một model cụ thể
     if (dcModelSetting.startsWith('gemini')) {
         return await callGeminiVision(optimized, finalPrompt, config, dcModelSetting);
     } else {
@@ -571,14 +570,22 @@ chrome.commands.onCommand.addListener((command) => {
     }
 });
 
-// ==================== GIAO TIẾP TIN NHẮN ====================
+// ==================== GIAO TIẾP TIN NHẮN (TOP-LEVEL SYNC LISTENER) ====================
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    if (!message || !message.type) return false;
+
+    // Ping keep-alive
+    if (message.type === 'PING') {
+        sendResponse({ success: true, pong: true });
+        return true;
+    }
+
     if (message.type === 'CAPTURE_FULL_PAGE_NATIVE') {
         const tabId = message.tabId || (sender.tab ? sender.tab.id : null);
         if (!tabId) {
             sendResponse({ success: false, error: 'Không xác định được tab' });
-            return;
+            return true;
         }
 
         captureScrollNative(tabId, message.mode || 'third').then((dataUrl) => {
@@ -705,6 +712,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             return true;
         }
     }
+
+    return false;
 });
 
-console.log('✅ Background ready with Double Check Audit System!');
+console.log('✅ Background ready with Ping Keep-Alive & Double Check Audit System!');
