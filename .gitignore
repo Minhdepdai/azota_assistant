@@ -1,0 +1,6 @@
+# Git ignore
+node_modules/
+*.pem
+*.crx
+.DS_Store
+Thumbs.db

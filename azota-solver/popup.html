@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Azota Solver</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <!-- Header -->
+  <div class="header">
+    <div class="logo">⚡ Azota Solver</div>
+    <div class="version">v1.0</div>
+  </div>
+
+  <!-- API Key Section -->
+  <div class="section">
+    <div class="section-title">🔑 Gemini API Key</div>
+    <div class="input-group">
+      <input
+        type="password"
+        id="apiKeyInput"
+        placeholder="Nhập API Key từ Google AI Studio..."
+        spellcheck="false"
+        autocomplete="off"
+      >
+      <button id="toggleKey" class="btn-icon" title="Hiện/ẩn">👁</button>
+    </div>
+    <button id="saveKey" class="btn-primary">💾 Lưu API Key</button>
+    <div id="keyStatus" class="status-msg"></div>
+  </div>
+
+  <!-- Status Section -->
+  <div class="section">
+    <div class="section-title">📊 Trạng thái</div>
+    <div class="status-grid">
+      <div class="status-item">
+        <span class="status-label">Captured:</span>
+        <span class="status-value" id="capturedCount">0</span>
+      </div>
+      <div class="status-item">
+        <span class="status-label">Đáp án:</span>
+        <span class="status-value" id="answerCount">0</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Answers Section -->
+  <div class="section">
+    <div class="section-title">
+      ✅ Đáp án
+      <button id="refreshBtn" class="btn-small" title="Làm mới">🔄</button>
+    </div>
+    <div id="answersList" class="answers-list">
+      <div class="empty-state">Chưa có đáp án. Mở bài thi Azota để bắt đầu.</div>
+    </div>
+  </div>
+
+  <!-- Log Section -->
+  <div class="section collapsible">
+    <div class="section-title toggle-header" id="toggleLog">
+      📋 Log Requests
+      <span class="toggle-arrow">▼</span>
+    </div>
+    <div id="logList" class="log-list hidden">
+      <div class="empty-state">Chưa có log</div>
+    </div>
+  </div>
+
+  <!-- Footer -->
+  <div class="footer">
+    <a href="https://aistudio.google.com/apikey" target="_blank" id="getKeyLink">
+      Lấy API Key miễn phí →
+    </a>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

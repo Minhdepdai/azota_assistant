@@ -1,0 +1,45 @@
+{
+  "manifest_version": 3,
+  "name": "Azota Solver",
+  "version": "1.0.0",
+  "description": "Trợ lý giải bài thi Azota",
+
+  "permissions": [
+    "storage",
+    "activeTab"
+  ],
+
+  "host_permissions": [
+    "*://*.azota.vn/*",
+    "*://azota.vn/*",
+    "https://generativelanguage.googleapis.com/*"
+  ],
+
+  "background": {
+    "service_worker": "background.js"
+  },
+
+  "content_scripts": [
+    {
+      "matches": [
+        "*://*.azota.vn/*",
+        "*://azota.vn/*"
+      ],
+      "js": ["content.js"],
+      "run_at": "document_start",
+      "all_frames": true
+    }
+  ],
+
+  "web_accessible_resources": [
+    {
+      "resources": ["interceptor.js"],
+      "matches": ["*://*.azota.vn/*", "*://azota.vn/*"]
+    }
+  ],
+
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Azota Solver"
+  }
+}

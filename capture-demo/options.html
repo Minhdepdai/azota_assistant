@@ -1,0 +1,604 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cài đặt AI - Screen Capture</title>
+    <style>
+        :root {
+            --bg-base: #090d16;
+            --bg-surface: #111726;
+            --bg-elevated: #182238;
+            --bg-input: #0e1422;
+            --border: rgba(255, 255, 255, 0.08);
+            --border-hover: rgba(255, 255, 255, 0.16);
+            --border-focus: #3b82f6;
+            --accent: #3b82f6;
+            --accent-glow: rgba(59, 130, 246, 0.25);
+            --accent-hover: #2563eb;
+            --accent-green: #10b981;
+            --text-primary: #f8fafc;
+            --text-secondary: #94a3b8;
+            --text-muted: #64748b;
+            --radius-sm: 6px;
+            --radius-md: 10px;
+            --radius-lg: 14px;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            background: var(--bg-base);
+            color: var(--text-primary);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            padding: 32px 16px;
+            background-image: 
+                radial-gradient(circle at 50% 0%, rgba(59, 130, 246, 0.08), transparent 45%),
+                radial-gradient(circle at 100% 100%, rgba(16, 185, 129, 0.04), transparent 40%);
+        }
+
+        .container {
+            width: 100%;
+            max-width: 720px;
+            background: var(--bg-surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-lg);
+            padding: 32px;
+            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.03);
+            backdrop-filter: blur(20px);
+        }
+
+        .header {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            border-bottom: 1px solid var(--border);
+            padding-bottom: 20px;
+            margin-bottom: 24px;
+        }
+
+        .header-title h1 {
+            font-size: 19px;
+            font-weight: 700;
+            letter-spacing: -0.3px;
+            color: #fff;
+        }
+
+        .header-title p {
+            font-size: 13px;
+            color: var(--text-secondary);
+            margin-top: 4px;
+            line-height: 1.4;
+        }
+
+        .header-badge {
+            font-size: 11px;
+            font-weight: 600;
+            padding: 4px 10px;
+            background: rgba(59, 130, 246, 0.12);
+            color: #60a5fa;
+            border: 1px solid rgba(59, 130, 246, 0.25);
+            border-radius: 20px;
+            letter-spacing: 0.3px;
+        }
+
+        /* Stats Grid */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 12px;
+            margin-bottom: 24px;
+        }
+
+        .stat-card {
+            background: var(--bg-elevated);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-md);
+            padding: 14px 16px;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+        }
+
+        .stat-label {
+            font-size: 11px;
+            font-weight: 600;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .stat-value {
+            font-size: 20px;
+            font-weight: 700;
+            color: #fff;
+            margin-top: 6px;
+            font-feature-settings: "tnum";
+            font-variant-numeric: tabular-nums;
+        }
+
+        .stat-sub {
+            font-size: 11px;
+            color: var(--text-secondary);
+            margin-top: 2px;
+        }
+
+        .btn-reset-stats {
+            background: none;
+            border: none;
+            color: #f87171;
+            font-size: 11px;
+            cursor: pointer;
+            text-align: left;
+            padding: 0;
+            margin-top: 4px;
+            transition: color 0.15s;
+        }
+
+        .btn-reset-stats:hover {
+            color: #ef4444;
+            text-decoration: underline;
+        }
+
+        /* Provider Segmented Control */
+        .segmented-control {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 4px;
+            background: var(--bg-input);
+            padding: 4px;
+            border-radius: var(--radius-md);
+            border: 1px solid var(--border);
+            margin-bottom: 24px;
+        }
+
+        .segmented-btn {
+            background: transparent;
+            border: none;
+            padding: 9px 16px;
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            border-radius: var(--radius-sm);
+            cursor: pointer;
+            transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        .segmented-btn:hover {
+            color: #fff;
+        }
+
+        .segmented-btn.active {
+            background: var(--bg-elevated);
+            color: #fff;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+            border: 1px solid var(--border-hover);
+        }
+
+        /* Form Controls */
+        .form-section {
+            display: flex;
+            flex-direction: column;
+            gap: 18px;
+        }
+
+        .section-divider {
+            border-top: 1px solid var(--border);
+            padding-top: 22px;
+            margin-top: 6px;
+        }
+
+        .section-title {
+            font-size: 14px;
+            font-weight: 700;
+            color: #fff;
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .form-group {
+            display: flex;
+            flex-direction: column;
+            gap: 7px;
+        }
+
+        label {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 12.5px;
+            font-weight: 600;
+            color: #cbd5e1;
+        }
+
+        .label-badge {
+            font-size: 10.5px;
+            padding: 2px 8px;
+            border-radius: 12px;
+            background: rgba(255, 255, 255, 0.06);
+            color: var(--text-secondary);
+            font-weight: 500;
+        }
+
+        input[type="text"], input[type="number"], select, textarea {
+            width: 100%;
+            background: var(--bg-input);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            padding: 11px 13px;
+            font-size: 13px;
+            color: #fff;
+            outline: none;
+            transition: all 0.15s ease;
+            font-family: inherit;
+        }
+
+        input::placeholder, textarea::placeholder {
+            color: #475569;
+        }
+
+        input:hover, select:hover, textarea:hover {
+            border-color: var(--border-hover);
+        }
+
+        input:focus, select:focus, textarea:focus {
+            border-color: var(--border-focus);
+            box-shadow: 0 0 0 3px var(--accent-glow);
+            background: #0f172a;
+        }
+
+        select {
+            cursor: pointer;
+            appearance: none;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%2394a3b8'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M19 9l-7 7-7-7'%3E%3C/path%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 12px center;
+            background-size: 14px;
+            padding-right: 36px;
+        }
+
+        textarea {
+            resize: vertical;
+            line-height: 1.5;
+            min-height: 80px;
+        }
+
+        .hint {
+            font-size: 11.5px;
+            color: var(--text-muted);
+            line-height: 1.45;
+        }
+
+        .hint a {
+            color: #60a5fa;
+            text-decoration: none;
+        }
+
+        .hint a:hover {
+            text-decoration: underline;
+        }
+
+        .params-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+        }
+
+        /* Toggle Box */
+        .toggle-box {
+            background: var(--bg-input);
+            border: 1px solid var(--border);
+            padding: 12px 14px;
+            border-radius: var(--radius-sm);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .toggle-label-title {
+            font-size: 12.5px;
+            font-weight: 600;
+            color: #e2e8f0;
+        }
+
+        .toggle-label-sub {
+            font-size: 11px;
+            color: var(--text-muted);
+            margin-top: 1px;
+        }
+
+        .switch {
+            position: relative;
+            display: inline-block;
+            width: 38px;
+            height: 22px;
+            flex-shrink: 0;
+        }
+
+        .switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background-color: #334155;
+            transition: .2s;
+            border-radius: 22px;
+        }
+
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 16px;
+            width: 16px;
+            left: 3px;
+            bottom: 3px;
+            background-color: #fff;
+            transition: .2s;
+            border-radius: 50%;
+        }
+
+        input:checked + .slider {
+            background-color: var(--accent);
+        }
+
+        input:checked + .slider:before {
+            transform: translateX(16px);
+        }
+
+        /* Buttons */
+        .btn-row {
+            display: flex;
+            gap: 10px;
+            margin-top: 28px;
+            padding-top: 20px;
+            border-top: 1px solid var(--border);
+        }
+
+        .btn {
+            padding: 10px 18px;
+            border-radius: var(--radius-sm);
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            border: none;
+            transition: all 0.15s ease;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+        }
+
+        .btn:active {
+            transform: scale(0.98);
+        }
+
+        .btn-primary {
+            background: var(--accent);
+            color: #fff;
+            flex: 2;
+            box-shadow: 0 4px 14px rgba(59, 130, 246, 0.35);
+        }
+
+        .btn-primary:hover {
+            background: var(--accent-hover);
+        }
+
+        .btn-secondary {
+            background: var(--bg-elevated);
+            border: 1px solid var(--border);
+            color: var(--text-primary);
+            flex: 1.2;
+        }
+
+        .btn-secondary:hover {
+            background: #222f4c;
+            border-color: var(--border-hover);
+        }
+
+        .btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        /* Alert Toast */
+        .alert-box {
+            display: none;
+            padding: 12px 16px;
+            border-radius: var(--radius-sm);
+            margin-bottom: 20px;
+            font-size: 12.5px;
+            line-height: 1.5;
+            white-space: pre-wrap;
+        }
+
+        .alert-success {
+            background: rgba(16, 185, 129, 0.1);
+            border: 1px solid rgba(16, 185, 129, 0.3);
+            color: #34d399;
+        }
+
+        .alert-error {
+            background: rgba(239, 68, 68, 0.1);
+            border: 1px solid rgba(239, 68, 68, 0.3);
+            color: #f87171;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <div class="header">
+            <div class="header-title">
+                <h1>Cấu hình Mô hình & API Keys</h1>
+                <p>Quản lý riêng biệt API Keys cho Google Gemini, OpenAI Compatible và tính năng Soát bài (Double Check)</p>
+            </div>
+            <div class="header-badge" id="activeProviderBadge">Gemini Active</div>
+        </div>
+
+        <!-- Token Statistics Dashboard -->
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-label">Tổng Token Đã Dùng</div>
+                <div class="stat-value" id="statTotalTokens">0</div>
+                <div class="stat-sub" id="statTokenDetails">Prompt: 0 | Output: 0</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Số Lần Gọi API</div>
+                <div class="stat-value" id="statTotalRequests">0</div>
+                <div class="stat-sub">Lần xử lý thành công</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">API Keys Sẵn Sàng</div>
+                <div class="stat-value" id="statActiveKeys">0</div>
+                <button type="button" id="btnResetStats" class="btn-reset-stats">Đặt lại số liệu</button>
+            </div>
+        </div>
+
+        <!-- Provider Switcher -->
+        <div class="segmented-control">
+            <button type="button" class="segmented-btn active" data-provider="gemini">Google Gemini</button>
+            <button type="button" class="segmented-btn" data-provider="openai">OpenAI Compatible</button>
+        </div>
+
+        <div id="alertBox" class="alert-box"></div>
+
+        <form id="settingsForm">
+            <!-- ==================== SECTION 1: GOOGLE GEMINI ==================== -->
+            <div id="sectionGemini" class="form-section">
+                <div class="form-group">
+                    <label for="geminiApiKeys">
+                        <span>Danh sách Gemini API Keys (Mỗi dòng 1 Key)</span>
+                        <span class="label-badge" id="geminiKeyCountBadge">0 Key</span>
+                    </label>
+                    <textarea id="geminiApiKeys" rows="3" placeholder="AIzaSyA... (Dòng 1: Key chính)&#10;AIzaSyB... (Dòng 2: Key dự phòng)" spellcheck="false"></textarea>
+                    <div class="hint">
+                        Tự động xoay vòng khi hết hạn mức. Lấy key miễn phí tại <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener">Google AI Studio ↗</a>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="geminiModelSelect">Mô hình Gemini (Effort: Cao Nhất)</label>
+                    <select id="geminiModelSelect">
+                        <option value="gemini-3.7-flash">Gemini 3.7 Flash (Mới nhất - Khuyên dùng)</option>
+                        <option value="gemini-3.6-flash">Gemini 3.6 Flash (Tốc độ cao)</option>
+                        <option value="gemini-3.5-flash">Gemini 3.5 Flash (Ổn định)</option>
+                    </select>
+                </div>
+            </div>
+
+            <!-- ==================== SECTION 2: OPENAI COMPATIBLE ==================== -->
+            <div id="sectionOpenAI" class="form-section" style="display: none;">
+                <div class="form-group">
+                    <label for="openaiBaseUrl">Endpoint Base URL</label>
+                    <input type="text" id="openaiBaseUrl" placeholder="https://api.openai.com/v1" spellcheck="false">
+                    <div class="hint">Hỗ trợ OpenAI, OpenRouter (`https://openrouter.ai/api/v1`), OneAPI, NewAPI, Groq, Ollama...</div>
+                </div>
+
+                <div class="form-group">
+                    <label for="openaiApiKeys">
+                        <span>Danh sách OpenAI / Proxy API Keys (Mỗi dòng 1 Key)</span>
+                        <span class="label-badge" id="openaiKeyCountBadge">0 Key</span>
+                    </label>
+                    <textarea id="openaiApiKeys" rows="3" placeholder="sk-... (Dòng 1: Key chính)&#10;sk-... (Dòng 2: Key dự phòng)" spellcheck="false"></textarea>
+                    <div class="hint">Key cho OpenAI Compatible được lưu trữ độc lập hoàn toàn với Gemini.</div>
+                </div>
+
+                <div class="form-group">
+                    <label for="openaiModelSelect">Mô hình AI</label>
+                    <select id="openaiModelSelect" style="margin-bottom: 8px;">
+                        <option value="gpt-5.6">ChatGPT 5.6 (Mới nhất)</option>
+                        <option value="gpt-5.5">ChatGPT 5.5 Turbo</option>
+                        <option value="claude-opus-4.8">Claude Opus 4.8 (Tư duy chuyên sâu)</option>
+                        <option value="chatgpt-4o-latest">ChatGPT-4o Latest</option>
+                        <option value="o3-mini">o3-mini (High Reasoning)</option>
+                        <option value="custom">Tùy chỉnh model khác...</option>
+                    </select>
+                    <input type="text" id="openaiCustomModel" placeholder="Nhập tên model (ví dụ: anthropic/claude-3.7-sonnet, deepseek-r1...)" style="display: none;" spellcheck="false">
+                </div>
+
+                <div class="form-group">
+                    <label>Thông số mở rộng (Để trống = Mặc định ChatGPT)</label>
+                    <div class="params-grid">
+                        <div>
+                            <input type="number" id="paramTemperature" placeholder="Temperature (0.2)" min="0" max="2" step="0.1">
+                        </div>
+                        <div>
+                            <input type="number" id="paramMaxTokens" placeholder="Max Tokens (4096)" min="500" max="16384" step="500">
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ==================== COMMON PROMPT SETTINGS ==================== -->
+            <div class="form-section section-divider">
+                <div class="section-title">Chỉ Dẫn Hệ Thống Giải Bài Ban Đầu</div>
+
+                <div class="form-group">
+                    <label for="promptTemplate">Prompt giải bài lần 1</label>
+                    <textarea id="promptTemplate" rows="3" placeholder="Bạn là chuyên gia giải đề thi. Hãy suy luận từng bước với độ chính xác cao nhất (Maximum Effort), giải thích chi tiết đề bài/câu hỏi trong ảnh chụp và chỉ rõ đáp án đúng nhất (A, B, C, D)..."></textarea>
+                </div>
+
+                <div class="toggle-box">
+                    <div>
+                        <div class="toggle-label-title">Tự động giải khi chụp</div>
+                        <div class="toggle-label-sub">Tự động gửi ảnh cho AI xử lý ngay sau phím tắt Alt+S</div>
+                    </div>
+                    <label class="switch">
+                        <input type="checkbox" id="autoAnalyze">
+                        <span class="slider"></span>
+                    </label>
+                </div>
+            </div>
+
+            <!-- ==================== SECTION 3: DOUBLE CHECK SETTINGS ==================== -->
+            <div class="form-section section-divider">
+                <div class="section-title">
+                    <span>Cấu hình Soát Bài Độc Lập (Double Check)</span>
+                    <span class="label-badge">Chuyên sâu</span>
+                </div>
+
+                <div class="form-group">
+                    <label for="doubleCheckModelSelect">Mô hình dùng để Double Check</label>
+                    <select id="doubleCheckModelSelect">
+                        <option value="same_as_main">Mặc định: Dùng cùng mô hình chính</option>
+                        <option value="gemini-3.7-flash">Gemini 3.7 Flash (Tư duy sâu)</option>
+                        <option value="gemini-3.6-flash">Gemini 3.6 Flash</option>
+                        <option value="gpt-5.6">ChatGPT 5.6 (OpenAI)</option>
+                        <option value="claude-opus-4.8">Claude Opus 4.8 (Thẩm định logic gắt gao)</option>
+                        <option value="o3-mini">o3-mini (High Reasoning)</option>
+                    </select>
+                    <div class="hint">Bạn có thể chọn mô hình khác để đối chiếu chéo (Cross-check) giúp phát hiện bẫy đề thi hiệu quả hơn.</div>
+                </div>
+
+                <div class="form-group">
+                    <label for="doubleCheckPrompt">Prompt Soát bài (Dùng biến {INITIAL_ANSWER})</label>
+                    <textarea id="doubleCheckPrompt" rows="4" placeholder="Bạn là chuyên gia thẩm định và soát bài cấp cao. Dưới đây là ảnh chụp đề bài gốc và Lời giải sơ bộ số 1 từ AI:&#10;&#10;--- [LỜI GIẢI SƠ BỘ] ---&#10;{INITIAL_ANSWER}&#10;----------------------&#10;&#10;Hãy đọc kỹ từng câu chữ, hình vẽ, số liệu trong ảnh và soát xét lại từng bước giải trên. Chỉ ra lời giải trước có đúng 100% không, có bị dính bẫy hay sai sót nào không. Cuối cùng, hãy đưa ra đáp án chính xác và chắc chắn nhất."></textarea>
+                    <div class="hint">Biến <code>{INITIAL_ANSWER}</code> sẽ tự động được thay thế bằng kết quả giải ban đầu.</div>
+                </div>
+            </div>
+
+            <div class="btn-row">
+                <button type="button" id="btnTestAll" class="btn btn-secondary">Kiểm tra kết nối</button>
+                <button type="submit" id="btnSave" class="btn btn-primary">Lưu cấu hình</button>
+            </div>
+        </form>
+    </div>
+
+    <script src="options.js"></script>
+</body>
+</html>
