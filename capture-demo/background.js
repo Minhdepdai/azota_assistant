@@ -52,7 +52,6 @@ function captureTabUniversal(windowId = null) {
             const winArg = windowId || null;
             const res = captureFn(winArg, { format: 'png' }, (dataUrl) => {
                 if (api.runtime.lastError) {
-                    // Thử lại không truyền windowId (dành cho Firefox Mobile)
                     try {
                         captureFn({ format: 'png' }, (dataUrl2) => {
                             if (api.runtime.lastError || !dataUrl2) {
@@ -126,125 +125,148 @@ async function stitchCaptures(captures, totalWidth, totalHeight, dpr) {
     return `data:image/png;base64,${btoa(binary)}`;
 }
 
-// Chụp cuộn trang Native (Hoạt động tốt trên cả Kiwi và Firefox)
+// Chụp màn hình thông minh (Bảo vệ 100% giao diện khi Fullscreen trên Kiwi Browser)
 async function captureScrollNative(tabId, mode = 'third') {
-    const dim = await executeScriptUniversal(tabId, () => {
-        const clientWidth = document.documentElement.clientWidth || window.innerWidth;
-        const scrollHeight = Math.max(
-            document.documentElement.scrollHeight,
-            document.body.scrollHeight,
-            window.innerHeight
-        );
-        return {
-            viewportWidth: window.innerWidth,
-            viewportHeight: window.innerHeight,
-            totalWidth: clientWidth,
-            totalHeight: scrollHeight,
-            dpr: window.devicePixelRatio || 1,
-            originalScrollX: window.scrollX || 0,
-            originalScrollY: window.scrollY || 0
-        };
-    });
+    let originalScrollX = 0, originalScrollY = 0;
+    
+    try {
+        const dim = await executeScriptUniversal(tabId, () => {
+            const clientWidth = document.documentElement.clientWidth || window.innerWidth;
+            const scrollHeight = Math.max(
+                document.documentElement.scrollHeight,
+                document.body.scrollHeight,
+                window.innerHeight
+            );
+            const isFull = !!(document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement);
+            return {
+                viewportWidth: window.innerWidth,
+                viewportHeight: window.innerHeight,
+                totalWidth: clientWidth,
+                totalHeight: scrollHeight,
+                dpr: window.devicePixelRatio || 1,
+                originalScrollX: window.scrollX || 0,
+                originalScrollY: window.scrollY || 0,
+                isFullscreen: isFull
+            };
+        });
 
-    if (!dim) throw new Error('Không thể lấy kích thước trang web');
+        if (!dim) throw new Error('Không thể lấy kích thước trang web');
 
-    const { viewportWidth, viewportHeight, totalWidth, totalHeight, dpr, originalScrollX, originalScrollY } = dim;
+        const { viewportWidth, viewportHeight, totalWidth, totalHeight, dpr, isFullscreen } = dim;
+        originalScrollX = dim.originalScrollX;
+        originalScrollY = dim.originalScrollY;
 
-    let startY = 0;
-    let targetCaptureHeight = totalHeight;
+        // Nếu đang ở Fullscreen trên điện thoại (Kiwi) hoặc trang cố định không cuộn được
+        if (isFullscreen || totalHeight <= viewportHeight + 10) {
+            // Tạm ẩn HUD bằng opacity để không làm xáo trộn DOM
+            await executeScriptUniversal(tabId, () => {
+                document.querySelectorAll('.capture-temp-ui').forEach(el => {
+                    el.style.opacity = '0';
+                });
+            });
 
-    if (mode === 'third') {
-        startY = originalScrollY;
-        const oneThird = Math.round(totalHeight / 3);
-        targetCaptureHeight = Math.min(oneThird, totalHeight - startY);
-        targetCaptureHeight = Math.max(targetCaptureHeight, Math.min(viewportHeight, totalHeight - startY));
-    } else if (mode === 'visible') {
-        startY = originalScrollY;
-        targetCaptureHeight = Math.min(viewportHeight, totalHeight - startY);
-    }
-
-    const captures = [];
-    let currentY = startY;
-    let accumulatedHeight = 0;
-
-    while (accumulatedHeight < targetCaptureHeight) {
-        const isFirstSlice = (accumulatedHeight === 0);
-        const remainingHeight = targetCaptureHeight - accumulatedHeight;
-
-        let scrollY = currentY;
-        let isLastCrop = false;
-        let sliceHeight = viewportHeight;
-
-        if (remainingHeight <= viewportHeight) {
-            sliceHeight = remainingHeight;
-            if (!isFirstSlice) {
-                isLastCrop = true;
-                scrollY = Math.max(0, startY + targetCaptureHeight - viewportHeight);
-            }
+            await new Promise(r => setTimeout(r, 120));
+            const singleCap = await captureTabUniversal(null);
+            return singleCap;
         }
 
-        await executeScriptUniversal(tabId, (y, isFirst) => {
-            window.scrollTo(0, y);
-            window.dispatchEvent(new Event('scroll'));
+        let startY = originalScrollY;
+        let targetCaptureHeight = totalHeight;
 
-            document.querySelectorAll('.capture-temp-ui').forEach(el => el.style.display = 'none');
+        if (mode === 'third') {
+            const oneThird = Math.round(totalHeight / 3);
+            targetCaptureHeight = Math.min(oneThird, totalHeight - startY);
+            targetCaptureHeight = Math.max(targetCaptureHeight, Math.min(viewportHeight, totalHeight - startY));
+        } else if (mode === 'visible') {
+            targetCaptureHeight = Math.min(viewportHeight, totalHeight - startY);
+        }
 
-            const allElements = document.querySelectorAll('*');
-            for (const el of allElements) {
-                if (el.classList.contains('capture-temp-ui')) continue;
-                const style = window.getComputedStyle(el);
-                if (style.position === 'fixed' || style.position === 'sticky') {
-                    if (!isFirst) {
-                        if (!el.dataset.prevVis) {
-                            el.dataset.prevVis = el.style.visibility || 'visible';
-                        }
-                        el.style.visibility = 'hidden';
-                    } else {
-                        if (el.dataset.prevVis) {
-                            el.style.visibility = el.dataset.prevVis === 'visible' ? '' : el.dataset.prevVis;
-                            delete el.dataset.prevVis;
-                        }
-                    }
+        const captures = [];
+        let currentY = startY;
+        let accumulatedHeight = 0;
+
+        while (accumulatedHeight < targetCaptureHeight) {
+            const isFirstSlice = (accumulatedHeight === 0);
+            const remainingHeight = targetCaptureHeight - accumulatedHeight;
+
+            let scrollY = currentY;
+            let isLastCrop = false;
+            let sliceHeight = viewportHeight;
+
+            if (remainingHeight <= viewportHeight) {
+                sliceHeight = remainingHeight;
+                if (!isFirstSlice) {
+                    isLastCrop = true;
+                    scrollY = Math.max(0, startY + targetCaptureHeight - viewportHeight);
                 }
             }
-        }, [scrollY, isFirstSlice]);
 
-        await new Promise(r => setTimeout(r, 260));
+            await executeScriptUniversal(tabId, (y, isFirst) => {
+                window.scrollTo(0, y);
+                window.dispatchEvent(new Event('scroll'));
 
-        const dataUrl = await captureTabUniversal(null);
+                document.querySelectorAll('.capture-temp-ui').forEach(el => {
+                    el.style.opacity = '0';
+                });
 
-        if (dataUrl) {
-            captures.push({
-                dataUrl,
-                destY: accumulatedHeight,
-                viewportHeight,
-                sliceHeight,
-                isLastCrop
-            });
-        }
+                // Chỉ ẩn tạm header/nav nhỏ, tuyệt đối KHÔNG đụng vào app container
+                const headers = document.querySelectorAll('header, nav, [role="banner"]');
+                headers.forEach(el => {
+                    if (!isFirst) {
+                        if (!el.dataset.prevVis) el.dataset.prevVis = el.style.visibility || 'visible';
+                        el.style.visibility = 'hidden';
+                    }
+                });
+            }, [scrollY, isFirstSlice]);
 
-        accumulatedHeight += sliceHeight;
-        currentY += viewportHeight;
+            await new Promise(r => setTimeout(r, 260));
 
-        if (isLastCrop || accumulatedHeight >= targetCaptureHeight) {
-            break;
-        }
-    }
+            const dataUrl = await captureTabUniversal(null);
 
-    await executeScriptUniversal(tabId, (x, y) => {
-        window.scrollTo(x, y);
-        document.querySelectorAll('.capture-temp-ui').forEach(el => el.style.display = '');
+            if (dataUrl) {
+                captures.push({
+                    dataUrl,
+                    destY: accumulatedHeight,
+                    viewportHeight,
+                    sliceHeight,
+                    isLastCrop
+                });
+            }
 
-        const allElements = document.querySelectorAll('*');
-        for (const el of allElements) {
-            if (el.dataset.prevVis) {
-                el.style.visibility = el.dataset.prevVis === 'visible' ? '' : el.dataset.prevVis;
-                delete el.dataset.prevVis;
+            accumulatedHeight += sliceHeight;
+            currentY += viewportHeight;
+
+            if (isLastCrop || accumulatedHeight >= targetCaptureHeight) {
+                break;
             }
         }
-    }, [originalScrollX, originalScrollY]);
 
-    return await stitchCaptures(captures, totalWidth, targetCaptureHeight, dpr);
+        if (captures.length === 1) {
+            return captures[0].dataUrl;
+        }
+
+        return await stitchCaptures(captures, totalWidth, targetCaptureHeight, dpr);
+
+    } finally {
+        // ĐẢM BẢO 100% PHỤC HỒI NGUYÊN VẸN MÀN HÌNH DÙ CÓ LỖI XẢY RA
+        try {
+            await executeScriptUniversal(tabId, (origX, origY) => {
+                window.scrollTo(origX, origY);
+                document.querySelectorAll('.capture-temp-ui').forEach(el => {
+                    el.style.opacity = '1';
+                    el.style.display = '';
+                });
+                document.querySelectorAll('header, nav, [role="banner"]').forEach(el => {
+                    if (el.dataset.prevVis) {
+                        el.style.visibility = el.dataset.prevVis === 'visible' ? '' : el.dataset.prevVis;
+                        delete el.dataset.prevVis;
+                    }
+                });
+            }, [originalScrollX, originalScrollY]);
+        } catch (restoreErr) {
+            console.warn('Lỗi restore DOM:', restoreErr);
+        }
+    }
 }
 
 // ==================== CẬP NHẬT BỘ ĐẾM TOKEN ====================
