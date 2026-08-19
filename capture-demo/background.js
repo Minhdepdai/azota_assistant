@@ -40,42 +40,81 @@ async function executeScriptUniversal(tabId, func, args = []) {
     throw new Error('Trình duyệt không hỗ trợ scripting API');
 }
 
-function captureTabUniversal(windowId = null) {
-    return new Promise((resolve, reject) => {
-        try {
-            const captureFn = (api.tabs && api.tabs.captureVisibleTab) ? api.tabs.captureVisibleTab.bind(api.tabs) : null;
-            if (!captureFn) {
-                reject(new Error('Trình duyệt không hỗ trợ captureVisibleTab'));
-                return;
-            }
-
-            const winArg = windowId || null;
-            const res = captureFn(winArg, { format: 'png' }, (dataUrl) => {
-                if (api.runtime.lastError) {
-                    try {
-                        captureFn({ format: 'png' }, (dataUrl2) => {
-                            if (api.runtime.lastError || !dataUrl2) {
-                                reject(new Error(api.runtime.lastError?.message || 'Lỗi chụp màn hình'));
-                            } else {
-                                resolve(dataUrl2);
-                            }
-                        });
-                    } catch (e2) {
-                        reject(new Error(api.runtime.lastError?.message || e2.message));
-                    }
-                } else if (!dataUrl) {
-                    reject(new Error('Không lấy được dữ liệu ảnh chụp'));
-                } else {
-                    resolve(dataUrl);
-                }
-            });
-
-            if (res && typeof res.then === 'function') {
-                res.then(resolve).catch(reject);
-            }
-        } catch (err) {
-            reject(err);
+// BỘ CHỤP NATIVE TỰ TÌM WINDOW ID (FIX TRIỆT ĐỂ LỖI 'No active web contents' TRÊN KIWI BROWSER)
+function captureTabUniversal(targetWindowId = null) {
+    return new Promise(async (resolve, reject) => {
+        const captureFn = (api.tabs && api.tabs.captureVisibleTab) ? api.tabs.captureVisibleTab.bind(api.tabs) : null;
+        if (!captureFn) {
+            reject(new Error('Trình duyệt không hỗ trợ captureVisibleTab'));
+            return;
         }
+
+        // Danh sách các windowId ứng viên để thử nghiệm
+        const candidateWindowIds = [];
+
+        // 1. windowId được truyền trực tiếp từ sender.tab
+        if (targetWindowId !== null && targetWindowId !== undefined) {
+            candidateWindowIds.push(targetWindowId);
+        }
+
+        // 2. windowId lấy từ active tab
+        try {
+            const activeTabs = await api.tabs.query({ active: true });
+            if (activeTabs) {
+                activeTabs.forEach(t => {
+                    if (t.windowId !== undefined && !candidateWindowIds.includes(t.windowId)) {
+                        candidateWindowIds.push(t.windowId);
+                    }
+                });
+            }
+        } catch (e) {}
+
+        // 3. windowId lấy từ windows API
+        try {
+            if (api.windows && api.windows.getAll) {
+                const wins = await api.windows.getAll();
+                if (wins) {
+                    wins.forEach(w => {
+                        if (w.id !== undefined && !candidateWindowIds.includes(w.id)) {
+                            candidateWindowIds.push(w.id);
+                        }
+                    });
+                }
+            }
+        } catch (e) {}
+
+        // 4. Null fallback (cho Desktop Chrome / Firefox)
+        candidateWindowIds.push(null);
+
+        let lastErr = null;
+        for (const winId of candidateWindowIds) {
+            try {
+                const dataUrl = await new Promise((res, rej) => {
+                    const callback = (result) => {
+                        if (api.runtime.lastError || !result) {
+                            rej(new Error(api.runtime.lastError?.message || 'Empty capture'));
+                        } else {
+                            res(result);
+                        }
+                    };
+
+                    if (winId !== null && winId !== undefined) {
+                        captureFn(winId, { format: 'png' }, callback);
+                    } else {
+                        captureFn({ format: 'png' }, callback);
+                    }
+                });
+
+                if (dataUrl) {
+                    resolve(dataUrl);
+                    return;
+                }
+            } catch (err) {
+                lastErr = err;
+            }
+        }
+
+        reject(lastErr || new Error('No active web contents to capture'));
     });
 }
 
@@ -125,10 +164,19 @@ async function stitchCaptures(captures, totalWidth, totalHeight, dpr) {
     return `data:image/png;base64,${btoa(binary)}`;
 }
 
-// Chụp màn hình thông minh (Bảo vệ 100% giao diện khi Fullscreen trên Kiwi Browser)
-async function captureScrollNative(tabId, mode = 'third') {
+// Chụp cuộn trang Native 100% với windowId chỉ định
+async function captureScrollNative(tabId, mode = 'third', initialWindowId = null) {
     let originalScrollX = 0, originalScrollY = 0;
     
+    // Lấy chính xác windowId của tab từ hệ thống
+    let targetWinId = initialWindowId;
+    try {
+        const tabInfo = await api.tabs.get(tabId);
+        if (tabInfo && tabInfo.windowId !== undefined) {
+            targetWinId = tabInfo.windowId;
+        }
+    } catch (e) {}
+
     try {
         const dim = await executeScriptUniversal(tabId, () => {
             const clientWidth = document.documentElement.clientWidth || window.innerWidth;
@@ -156,9 +204,8 @@ async function captureScrollNative(tabId, mode = 'third') {
         originalScrollX = dim.originalScrollX;
         originalScrollY = dim.originalScrollY;
 
-        // Nếu đang ở Fullscreen trên điện thoại (Kiwi) hoặc trang cố định không cuộn được
+        // Nếu ở chế độ Fullscreen hoặc trang cố định không cuộn
         if (isFullscreen || totalHeight <= viewportHeight + 10) {
-            // Tạm ẩn HUD bằng opacity để không làm xáo trộn DOM
             await executeScriptUniversal(tabId, () => {
                 document.querySelectorAll('.capture-temp-ui').forEach(el => {
                     el.style.opacity = '0';
@@ -166,7 +213,7 @@ async function captureScrollNative(tabId, mode = 'third') {
             });
 
             await new Promise(r => setTimeout(r, 120));
-            const singleCap = await captureTabUniversal(null);
+            const singleCap = await captureTabUniversal(targetWinId);
             return singleCap;
         }
 
@@ -209,7 +256,6 @@ async function captureScrollNative(tabId, mode = 'third') {
                     el.style.opacity = '0';
                 });
 
-                // Chỉ ẩn tạm header/nav nhỏ, tuyệt đối KHÔNG đụng vào app container
                 const headers = document.querySelectorAll('header, nav, [role="banner"]');
                 headers.forEach(el => {
                     if (!isFirst) {
@@ -221,7 +267,7 @@ async function captureScrollNative(tabId, mode = 'third') {
 
             await new Promise(r => setTimeout(r, 260));
 
-            const dataUrl = await captureTabUniversal(null);
+            const dataUrl = await captureTabUniversal(targetWinId);
 
             if (dataUrl) {
                 captures.push({
@@ -248,7 +294,6 @@ async function captureScrollNative(tabId, mode = 'third') {
         return await stitchCaptures(captures, totalWidth, targetCaptureHeight, dpr);
 
     } finally {
-        // ĐẢM BẢO 100% PHỤC HỒI NGUYÊN VẸN MÀN HÌNH DÙ CÓ LỖI XẢY RA
         try {
             await executeScriptUniversal(tabId, (origX, origY) => {
                 window.scrollTo(origX, origY);
@@ -595,59 +640,6 @@ async function performDoubleCheck(imageDataUrl, initialAnswer) {
     }
 }
 
-// ==================== PHÍM TẮT TOÀN CỤC (ALT+SHIFT+S) ====================
-
-if (api.commands && api.commands.onCommand) {
-    api.commands.onCommand.addListener((command) => {
-        if (command === 'quick_capture') {
-            api.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-                if (tabs && tabs[0] && tabs[0].id) {
-                    const tab = tabs[0];
-                    captureScrollNative(tab.id, 'third').then(async (dataUrl) => {
-                        const now = new Date();
-                        const timestamp = now.toISOString().replace(/[:.]/g, '-');
-                        const filename = `capture_${timestamp}.png`;
-
-                        const result = {
-                            id: 'cap_' + Date.now(),
-                            image: dataUrl,
-                            filename: filename,
-                            timestamp: now.toISOString(),
-                            pageUrl: tab.url,
-                            pageTitle: tab.title || 'Untitled',
-                            mode: 'native-third',
-                            geminiAnswer: null,
-                            geminiUsage: null,
-                            doubleCheckAnswer: null
-                        };
-
-                        const settings = await api.storage.local.get(['geminiAutoAnalyze']);
-                        if (settings.geminiAutoAnalyze) {
-                            try {
-                                const res = await callUnifiedAI(dataUrl);
-                                result.geminiAnswer = res.answer;
-                                result.geminiUsage = res.usage;
-                                result.aiProvider = res.provider;
-                                result.aiModel = res.model;
-                            } catch (err) {
-                                console.warn('Lỗi auto-analyze:', err);
-                            }
-                        }
-
-                        captureHistory.unshift(result);
-                        api.storage.local.set({
-                            lastCapture: result,
-                            captureHistory: captureHistory.slice(0, 50)
-                        });
-                    }).catch(err => {
-                        console.error('Lỗi phím tắt capture:', err);
-                    });
-                }
-            });
-        }
-    });
-}
-
 // ==================== GIAO TIẾP TIN NHẮN ====================
 
 api.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -660,12 +652,14 @@ api.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
     if (message.type === 'CAPTURE_FULL_PAGE_NATIVE') {
         const tabId = message.tabId || (sender.tab ? sender.tab.id : null);
+        const winId = sender.tab ? sender.tab.windowId : null;
+
         if (!tabId) {
             sendResponse({ success: false, error: 'Không xác định được tab' });
             return true;
         }
 
-        captureScrollNative(tabId, message.mode || 'third').then((dataUrl) => {
+        captureScrollNative(tabId, message.mode || 'third', winId).then((dataUrl) => {
             sendResponse({ success: true, dataUrl });
         }).catch((err) => {
             console.error('Lỗi capture cuộn native:', err);
@@ -789,4 +783,4 @@ api.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return false;
 });
 
-console.log('✅ Background ready for both Kiwi Browser and Firefox Mobile!');
+console.log('✅ Background ready with Native Window Targeting for Kiwi Browser!');
