@@ -1,4 +1,4 @@
-// background.js - 100% Thuần Native Chrome Capture (Thuật toán ghép ảnh Pixel-Perfect không mất chữ)
+// background.js - 100% Thuần Native Chrome Capture (Tự động loại bỏ Panel Sticky/Fixed che khuất đề thi)
 
 console.log('📸 Background service worker started (100% Pure Native Engine)');
 
@@ -140,7 +140,7 @@ async function stitchCaptures(captures, totalWidth, totalHeight, dpr) {
     return `data:image/png;base64,${btoa(binary)}`;
 }
 
-// ==================== BỘ CUỘN DÀI NATIVE PIXEL-PERFECT (KHÔNG MẤT NỘI DUNG Ở GIỮA) ====================
+// ==================== BỘ CUỘN DÀI NATIVE TỰ ĐỘNG ẨN STICKY TOP BAR CỦA AZOTA ====================
 
 async function captureScrollNative(tabId, mode = 'third', initialWindowId = null) {
     let originalScrollX = 0, originalScrollY = 0;
@@ -213,12 +213,12 @@ async function captureScrollNative(tabId, mode = 'third', initialWindowId = null
         let iteration = 0;
         const maxIterations = 15;
 
-        // Vòng lặp cuộn và ghép chính xác từng pixel (Pixel-Perfect Seam Stitching)
+        // Vòng lặp cuộn và ghép chính xác từng pixel (Tự động ẩn thanh Sticky Top của Azota từ khung thứ 2)
         while (accumulatedHeight < targetCaptureHeight && iteration < maxIterations) {
             const isFirstSlice = (iteration === 0);
             const targetScrollY = startY + accumulatedHeight;
 
-            // Cuộn đến vị trí chính xác và đo vị trí thực tế mà trình duyệt dừng lại
+            // Cuộn đến vị trí chính xác, ẩn sticky bar & đo vị trí thực tế
             const actualScrollY = await executeScriptUniversal(tabId, (y, isFirst) => {
                 window.scrollTo(0, y);
                 document.documentElement.scrollTop = y;
@@ -233,17 +233,33 @@ async function captureScrollNative(tabId, mode = 'third', initialWindowId = null
 
                 window.dispatchEvent(new Event('scroll'));
 
+                // Tạm ẩn HUD bằng opacity trong tích tắc để chụp
                 document.querySelectorAll('.capture-temp-ui').forEach(el => {
                     el.style.opacity = '0';
                 });
 
-                const headers = document.querySelectorAll('header, nav, [role="banner"]');
-                headers.forEach(el => {
-                    if (!isFirst) {
-                        if (!el.dataset.prevVis) el.dataset.prevVis = el.style.visibility || 'visible';
-                        el.style.visibility = 'hidden';
+                // TỰ ĐỘNG ẨN TẤT CẢ PANEL / HEADER / STICKY BAR CỦA AZOTA TỪ KHUNG THỨ 2 TRỞ ĐI
+                if (!isFirst) {
+                    const fixedCandidates = document.querySelectorAll('div, header, nav, section, [role="banner"], [role="navigation"]');
+                    for (const el of fixedCandidates) {
+                        if (el.classList.contains('capture-temp-ui') || el.closest('.capture-temp-ui')) continue;
+                        
+                        const style = window.getComputedStyle(el);
+                        const pos = style.position;
+                        if (pos === 'fixed' || pos === 'sticky') {
+                            const rect = el.getBoundingClientRect();
+                            // Nếu là thanh Header trên cùng hoặc nút nổi fixed (chiều cao < 40% màn hình)
+                            if (rect.height > 0 && rect.height < window.innerHeight * 0.4) {
+                                if (!el.dataset.prevVis) {
+                                    el.dataset.prevVis = el.style.visibility || 'visible';
+                                    el.dataset.prevOp = el.style.opacity || '1';
+                                    el.style.visibility = 'hidden';
+                                    el.style.opacity = '0';
+                                }
+                            }
+                        }
                     }
-                });
+                }
 
                 return window.scrollY || window.pageYOffset || document.documentElement.scrollTop || y;
             }, [targetScrollY, isFirstSlice]);
@@ -316,11 +332,12 @@ async function captureScrollNative(tabId, mode = 'third', initialWindowId = null
                     el.style.display = '';
                 });
 
-                document.querySelectorAll('header, nav, [role="banner"]').forEach(el => {
-                    if (el.dataset.prevVis) {
-                        el.style.visibility = el.dataset.prevVis === 'visible' ? '' : el.dataset.prevVis;
-                        delete el.dataset.prevVis;
-                    }
+                // Phục hồi lại toàn bộ panel và header của trang
+                document.querySelectorAll('[data-prev-vis]').forEach(el => {
+                    el.style.visibility = el.dataset.prevVis === 'visible' ? '' : el.dataset.prevVis;
+                    el.style.opacity = el.dataset.prevOp === '1' ? '' : el.dataset.prevOp;
+                    delete el.dataset.prevVis;
+                    delete el.dataset.prevOp;
                 });
             }, [originalScrollX, originalScrollY]);
         } catch (restoreErr) {
@@ -798,4 +815,4 @@ api.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return false;
 });
 
-console.log('✅ Background ready with Pixel-Perfect Native Stitching Engine!');
+console.log('✅ Background ready with Auto Sticky-Header Suppression Engine!');
