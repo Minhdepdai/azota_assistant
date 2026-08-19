@@ -437,6 +437,36 @@
             border: 1px solid rgba(239, 68, 68, 0.3);
             color: #f87171;
         }
+
+        /* Mobile Optimization */
+        @media (max-width: 600px) {
+            body {
+                padding: 12px 8px;
+            }
+            .container {
+                padding: 18px 14px;
+                border-radius: 10px;
+            }
+            .header-title h1 {
+                font-size: 16px;
+            }
+            .stats-grid {
+                grid-template-columns: 1fr;
+                gap: 8px;
+            }
+            .segmented-control {
+                grid-template-columns: 1fr;
+            }
+            .params-grid {
+                grid-template-columns: 1fr;
+            }
+            .btn-row {
+                flex-direction: column;
+            }
+            .btn {
+                width: 100%;
+            }
+        }
     </style>
 </head>
 <body>

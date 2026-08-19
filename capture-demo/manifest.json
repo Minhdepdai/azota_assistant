@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Azota AI Assistant - Smart Screen Capture & Study Solver",
-  "version": "1.2.1",
-  "description": "Trợ lý học tập thông minh: Chụp màn hình cuộn, phân tích bài tập và đối chiếu đáp án với Google Gemini và OpenAI API.",
+  "version": "1.3.0",
+  "description": "Trợ lý học tập thông minh: Chụp màn hình cuộn, phân tích bài tập và đối chiếu đáp án với Google Gemini và OpenAI API trên máy tính & điện thoại (Firefox/Chrome).",
   "permissions": [
     "activeTab",
     "storage",
@@ -21,7 +21,14 @@
     }
   ],
   "background": {
-    "service_worker": "background.js"
+    "service_worker": "background.js",
+    "scripts": ["background.js"]
+  },
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "azota-ai-assistant@minhdepdai.github.io",
+      "strict_min_version": "109.0"
+    }
   },
   "action": {
     "default_popup": "popup.html",

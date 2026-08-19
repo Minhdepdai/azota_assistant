@@ -1,10 +1,12 @@
-// content.js - Floating HUD tối giản, hiển thị công thức Toán & Markdown chuẩn đẹp
+// content.js - Tương thích hoàn hảo trên Máy tính & Điện thoại (Firefox / Chrome Mobile)
 
-console.log('%c📸 Screen Capture AI HUD + Math Renderer Ready', 'color:#3b82f6;font-size:13px;font-weight:600;');
+console.log('%c📸 Screen Capture AI HUD (Mobile & Desktop Responsive)', 'color:#3b82f6;font-size:13px;font-weight:600;');
+
+const apiBridge = (typeof chrome !== 'undefined' && chrome.runtime) ? chrome : (typeof browser !== 'undefined' ? browser : null);
 
 const CONFIG = {
     clickCount: 2,
-    clickTimeout: 600,
+    clickTimeout: 500,
     triggerZone: {
         bottom: 250,
         right: 250
@@ -13,6 +15,7 @@ const CONFIG = {
 
 let clickCounter = 0;
 let clickTimer = null;
+let lastTouchTime = 0;
 let isProcessing = false;
 
 let hudHostElement = null;
@@ -29,20 +32,18 @@ let currentCaptureData = {
 };
 
 function isExtensionValid() {
-    return typeof chrome !== 'undefined' && chrome.runtime && !!chrome.runtime.id;
+    return apiBridge && !!apiBridge.runtime && !!apiBridge.runtime.id;
 }
 
-// ==================== BỘ RENDER MARKDOWN & TOÁN HỌC (MATH RENDERER) ====================
+// ==================== BỘ RENDER MARKDOWN & TOÁN HỌC ====================
 
 function renderMarkdownAndMath(text) {
     if (!text) return '';
 
-    // 1. Phân số LaTeX: \dfrac{a}{b} hoặc \frac{a}{b} (kể cả lồng nhau 1 cấp)
     let html = text.replace(/\\d?frac\{([^{}]+)\}\{([^{}]+)\}/g, (match, num, den) => {
         return `<span class="math-fraction"><span class="math-num">${num}</span><span class="math-den">${den}</span></span>`;
     });
 
-    // 2. Ký hiệu toán học & hình học LaTeX
     const latexMap = [
         [/\\triangle/g, '△'],
         [/\\Rightarrow/g, '⇒'],
@@ -86,32 +87,26 @@ function renderMarkdownAndMath(text) {
         html = html.replace(regex, replacement);
     });
 
-    // 3. Số mũ và chỉ số dưới
     html = html.replace(/\^\{([^{}]+)\}/g, '<sup>$1</sup>');
     html = html.replace(/\^([0-9a-zA-Z+-]+)/g, '<sup>$1</sup>');
     html = html.replace(/_\{([^{}]+)\}/g, '<sub>$1</sub>');
     html = html.replace(/_([0-9a-zA-Z+-]+)/g, '<sub>$1</sub>');
 
-    // 4. Khối công thức $$...$$ và $...$
     html = html.replace(/\$\$([^\$]+)\$\$/g, '<div class="math-block">$1</div>');
     html = html.replace(/\$([^\$]+)\$/g, '<span class="math-inline">$1</span>');
 
-    // 5. Tiêu đề Markdown
     html = html.replace(/^### (.*$)/gim, '<h4 class="md-h4">$1</h4>');
     html = html.replace(/^## (.*$)/gim, '<h3 class="md-h3">$1</h3>');
     html = html.replace(/^# (.*$)/gim, '<h2 class="md-h2">$1</h2>');
 
-    // 6. In đậm & in nghiêng
     html = html.replace(/\*\*(.*?)\*\*/g, '<strong class="md-bold">$1</strong>');
     html = html.replace(/__(.*?)__/g, '<strong class="md-bold">$1</strong>');
     html = html.replace(/\*([^\*\n]+)\*/g, '<em class="md-em">$1</em>');
     html = html.replace(/_([^_\n]+)_/g, '<em class="md-em">$1</em>');
 
-    // 7. Khối mã
     html = html.replace(/```([\s\S]*?)```/g, '<pre class="md-code"><code>$1</code></pre>');
     html = html.replace(/`([^`\n]+)`/g, '<code class="md-inline-code">$1</code>');
 
-    // 8. Danh sách gạch đầu dòng (* item, - item)
     const lines = html.split('\n');
     let inList = false;
     let newLines = [];
@@ -144,14 +139,12 @@ function renderMarkdownAndMath(text) {
             }
         }
     }
-    if (inList) {
-        newLines.push('</ul>');
-    }
+    if (inList) newLines.push('</ul>');
 
     return newLines.join('');
 }
 
-// ==================== TẠO FLOATING HUD (CLOSED SHADOW DOM) ====================
+// ==================== TẠO FLOATING HUD (TƯƠNG THÍCH MỌI KÍCH THƯỚC MÀN HÌNH) ====================
 
 function initOrUpdateHUD() {
     const parent = document.fullscreenElement || document.body || document.documentElement;
@@ -178,16 +171,17 @@ function initOrUpdateHUD() {
             }
             .hud-card {
                 position: fixed;
-                top: 50px;
-                right: 24px;
-                width: 440px;
-                max-height: 600px;
+                top: 30px;
+                right: 16px;
+                width: min(92vw, 360px);
+                max-width: calc(100vw - 20px);
+                max-height: 75vh;
                 background: rgba(15, 23, 42, 0.96);
                 backdrop-filter: blur(16px);
                 -webkit-backdrop-filter: blur(16px);
                 border: 1px solid rgba(255, 255, 255, 0.14);
                 border-radius: 12px;
-                box-shadow: 0 20px 45px rgba(0, 0, 0, 0.65), 0 0 0 1px rgba(255, 255, 255, 0.06);
+                box-shadow: 0 16px 40px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(255, 255, 255, 0.05);
                 color: #f8fafc;
                 display: flex;
                 flex-direction: column;
@@ -196,10 +190,11 @@ function initOrUpdateHUD() {
                 animation: hudAppear 0.25s cubic-bezier(0.16, 1, 0.3, 1);
                 user-select: text;
                 overflow: hidden;
+                box-sizing: border-box;
             }
 
             @keyframes hudAppear {
-                from { transform: translateY(-12px) scale(0.97); opacity: 0; }
+                from { transform: translateY(-10px) scale(0.97); opacity: 0; }
                 to { transform: translateY(0) scale(1); opacity: 1; }
             }
 
@@ -207,11 +202,12 @@ function initOrUpdateHUD() {
                 display: flex;
                 align-items: center;
                 justify-content: space-between;
-                padding: 11px 14px;
-                background: rgba(255, 255, 255, 0.03);
+                padding: 9px 12px;
+                background: rgba(255, 255, 255, 0.04);
                 border-bottom: 1px solid rgba(255, 255, 255, 0.08);
                 cursor: grab;
                 user-select: none;
+                touch-action: none;
             }
 
             .hud-header:active {
@@ -221,23 +217,23 @@ function initOrUpdateHUD() {
             .hud-title-group {
                 display: flex;
                 align-items: center;
-                gap: 8px;
+                gap: 6px;
             }
 
             .hud-title {
                 font-weight: 700;
-                font-size: 13px;
+                font-size: 12px;
                 letter-spacing: -0.2px;
                 color: #fff;
             }
 
             .hud-status-badge {
-                font-size: 10.5px;
+                font-size: 10px;
                 font-weight: 500;
-                padding: 2px 7px;
+                padding: 1px 6px;
                 background: rgba(59, 130, 246, 0.15);
                 color: #60a5fa;
-                border-radius: 10px;
+                border-radius: 8px;
                 border: 1px solid rgba(59, 130, 246, 0.3);
             }
 
@@ -251,7 +247,7 @@ function initOrUpdateHUD() {
                 border: none;
                 color: #94a3b8;
                 cursor: pointer;
-                padding: 3px 6px;
+                padding: 4px 6px;
                 border-radius: 4px;
                 font-size: 12px;
                 transition: all 0.15s;
@@ -269,11 +265,11 @@ function initOrUpdateHUD() {
             }
 
             .hud-body {
-                padding: 14px 16px;
+                padding: 12px 14px;
                 overflow-y: auto;
-                max-height: 480px;
-                line-height: 1.6;
-                font-size: 13px;
+                max-height: 58vh;
+                line-height: 1.55;
+                font-size: 12.5px;
                 color: #f1f5f9;
             }
 
@@ -285,10 +281,10 @@ function initOrUpdateHUD() {
                 border-radius: 2px;
             }
 
-            /* Typography & Math Styling */
+            /* Responsive Typography */
             .md-p {
-                margin: 4px 0 8px 0;
-                line-height: 1.65;
+                margin: 3px 0 6px 0;
+                line-height: 1.55;
             }
 
             .md-bold {
@@ -301,33 +297,33 @@ function initOrUpdateHUD() {
             }
 
             .md-h2, .md-h3, .md-h4 {
-                margin: 10px 0 6px 0;
+                margin: 8px 0 4px 0;
                 font-weight: 700;
                 color: #fff;
             }
             .md-h4 {
-                font-size: 13px;
+                font-size: 12px;
                 color: #60a5fa;
             }
 
             .md-list {
-                margin: 6px 0 10px 20px;
+                margin: 4px 0 8px 16px;
                 padding: 0;
-                line-height: 1.65;
+                line-height: 1.55;
             }
             .md-list li {
-                margin-bottom: 5px;
+                margin-bottom: 3px;
             }
 
-            /* Math Formula Styling */
+            /* Math Fractions */
             .math-fraction {
                 display: inline-flex;
                 flex-direction: column;
                 vertical-align: middle;
                 text-align: center;
-                padding: 0 3px;
-                font-size: 0.9em;
-                line-height: 1.1;
+                padding: 0 2px;
+                font-size: 0.88em;
+                line-height: 1.05;
                 font-family: 'Cambria Math', 'Times New Roman', serif;
             }
             .math-num {
@@ -348,54 +344,44 @@ function initOrUpdateHUD() {
             .math-block {
                 display: flex;
                 justify-content: center;
-                margin: 8px 0;
-                padding: 8px 12px;
+                margin: 6px 0;
+                padding: 6px 10px;
                 background: rgba(255, 255, 255, 0.04);
                 border-radius: 6px;
                 font-family: 'Cambria Math', 'Times New Roman', serif;
-                font-size: 14px;
+                font-size: 13px;
                 color: #60a5fa;
             }
 
-            .md-inline-code {
-                background: rgba(255, 255, 255, 0.08);
-                padding: 2px 5px;
-                border-radius: 4px;
-                font-size: 12px;
-                font-family: monospace;
-                color: #fca5a5;
-            }
-
-            /* Action Buttons Bar */
+            /* Action Buttons */
             .hud-action-bar {
                 display: flex;
-                gap: 8px;
-                margin-top: 14px;
-                padding-top: 12px;
+                gap: 6px;
+                margin-top: 10px;
+                padding-top: 10px;
                 border-top: 1px solid rgba(255, 255, 255, 0.1);
             }
 
             .hud-btn-dc-prominent {
-                flex: 1.5;
+                flex: 1.4;
                 background: rgba(16, 185, 129, 0.15);
                 border: 1px solid rgba(16, 185, 129, 0.35);
                 color: #34d399;
-                padding: 8px 12px;
+                padding: 7px 10px;
                 border-radius: 6px;
-                font-size: 12px;
+                font-size: 11.5px;
                 font-weight: 600;
                 cursor: pointer;
                 transition: all 0.15s ease;
                 display: flex;
                 align-items: center;
                 justify-content: center;
-                gap: 6px;
+                gap: 4px;
             }
 
             .hud-btn-dc-prominent:hover {
                 background: #10b981;
                 color: #fff;
-                box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
             }
 
             .hud-btn-copy-prominent {
@@ -403,16 +389,16 @@ function initOrUpdateHUD() {
                 background: #1e293b;
                 border: 1px solid rgba(255, 255, 255, 0.1);
                 color: #f8fafc;
-                padding: 8px 12px;
+                padding: 7px 10px;
                 border-radius: 6px;
-                font-size: 12px;
+                font-size: 11.5px;
                 font-weight: 500;
                 cursor: pointer;
                 transition: all 0.15s ease;
                 display: flex;
                 align-items: center;
                 justify-content: center;
-                gap: 5px;
+                gap: 4px;
             }
 
             .hud-btn-copy-prominent:hover {
@@ -420,10 +406,10 @@ function initOrUpdateHUD() {
                 color: #fff;
             }
 
-            /* Double Check Result Card */
+            /* Double Check Card */
             .hud-dc-card {
-                margin-top: 14px;
-                padding: 12px 14px;
+                margin-top: 10px;
+                padding: 10px 12px;
                 background: rgba(16, 185, 129, 0.08);
                 border: 1px solid rgba(16, 185, 129, 0.3);
                 border-radius: 8px;
@@ -435,37 +421,37 @@ function initOrUpdateHUD() {
                 display: flex;
                 align-items: center;
                 justify-content: space-between;
-                margin-bottom: 8px;
-                font-size: 11px;
+                margin-bottom: 6px;
+                font-size: 10.5px;
                 font-weight: 700;
                 color: #34d399;
                 text-transform: uppercase;
-                letter-spacing: 0.4px;
+                letter-spacing: 0.3px;
             }
 
             .hud-footer {
-                padding: 8px 14px;
+                padding: 7px 12px;
                 background: rgba(0, 0, 0, 0.25);
                 border-top: 1px solid rgba(255, 255, 255, 0.06);
                 display: flex;
                 justify-content: space-between;
                 align-items: center;
-                font-size: 11px;
+                font-size: 10.5px;
                 color: #94a3b8;
             }
 
             .hud-loading {
                 display: flex;
                 align-items: center;
-                gap: 8px;
+                gap: 6px;
                 color: #93c5fd;
                 font-weight: 500;
-                font-size: 12.5px;
+                font-size: 12px;
             }
 
             .spinner {
-                width: 14px;
-                height: 14px;
+                width: 13px;
+                height: 13px;
                 border: 2px solid rgba(59, 130, 246, 0.2);
                 border-top: 2px solid #3b82f6;
                 border-radius: 50%;
@@ -482,7 +468,34 @@ function initOrUpdateHUD() {
                 display: none;
             }
             .minimized {
-                width: 220px;
+                width: 180px;
+            }
+
+            /* TỐI ƯU HÓA ĐẶC BIỆT CHO MÀN HÌNH ĐIỆN THOẠI (< 600px) */
+            @media (max-width: 600px) {
+                .hud-card {
+                    top: 16px;
+                    left: 10px;
+                    right: 10px;
+                    width: auto;
+                    max-width: calc(100vw - 20px);
+                    max-height: 68vh;
+                    border-radius: 10px;
+                }
+                .hud-body {
+                    padding: 10px 12px;
+                    max-height: 48vh;
+                    font-size: 12px;
+                }
+                .hud-action-bar {
+                    flex-direction: column;
+                    gap: 5px;
+                }
+                .hud-btn-dc-prominent, .hud-btn-copy-prominent {
+                    width: 100%;
+                    padding: 7px 8px;
+                    font-size: 11px;
+                }
             }
         `;
         hudShadowRoot.appendChild(style);
@@ -505,7 +518,7 @@ function initOrUpdateHUD() {
             <div class="hud-body" id="hudBody"></div>
             <div class="hud-footer">
                 <span id="hudTokens">Token: 0</span>
-                <span style="font-size: 10px; color: #64748b;">Alt+S để chụp câu tiếp</span>
+                <span style="font-size: 9.5px; color: #64748b;">Alt+S hoặc click 📷 để chụp</span>
             </div>
         `;
 
@@ -527,37 +540,64 @@ function initOrUpdateHUD() {
             btnMinimize.textContent = hudContainer.classList.contains('minimized') ? '◻' : '━';
         });
 
-        // Draggable
+        // HỖ TRỢ KÉO THẢ TRÊN CẢ CHUỘT (DESKTOP) VÀ CẢM ỨNG (TOUCH / FIREFOX MOBILE)
         let isDragging = false;
         let startX, startY, initialLeft, initialTop;
 
-        hudHeader.addEventListener('mousedown', (e) => {
-            if (e.target.tagName === 'BUTTON') return;
+        function startDrag(clientX, clientY) {
             isDragging = true;
-            startX = e.clientX;
-            startY = e.clientY;
+            startX = clientX;
+            startY = clientY;
             const rect = hudContainer.getBoundingClientRect();
             initialLeft = rect.left;
             initialTop = rect.top;
+        }
 
-            function onMouseMove(moveEvent) {
-                if (!isDragging) return;
-                const dx = moveEvent.clientX - startX;
-                const dy = moveEvent.clientY - startY;
-                hudContainer.style.left = `${Math.max(10, initialLeft + dx)}px`;
-                hudContainer.style.top = `${Math.max(10, initialTop + dy)}px`;
-                hudContainer.style.right = 'auto';
-            }
+        function moveDrag(clientX, clientY) {
+            if (!isDragging) return;
+            const dx = clientX - startX;
+            const dy = clientY - startY;
+            const maxL = window.innerWidth - hudContainer.offsetWidth - 5;
+            const maxT = window.innerHeight - hudContainer.offsetHeight - 5;
+            hudContainer.style.left = `${Math.min(maxL, Math.max(5, initialLeft + dx))}px`;
+            hudContainer.style.top = `${Math.min(maxT, Math.max(5, initialTop + dy))}px`;
+            hudContainer.style.right = 'auto';
+        }
 
+        function endDrag() {
+            isDragging = false;
+        }
+
+        // Mouse events
+        hudHeader.addEventListener('mousedown', (e) => {
+            if (e.target.tagName === 'BUTTON') return;
+            startDrag(e.clientX, e.clientY);
+
+            function onMouseMove(moveEvent) { moveDrag(moveEvent.clientX, moveEvent.clientY); }
             function onMouseUp() {
-                isDragging = false;
+                endDrag();
                 window.removeEventListener('mousemove', onMouseMove);
                 window.removeEventListener('mouseup', onMouseUp);
             }
-
             window.addEventListener('mousemove', onMouseMove);
             window.addEventListener('mouseup', onMouseUp);
         });
+
+        // Touch events for Mobile (Firefox Android)
+        hudHeader.addEventListener('touchstart', (e) => {
+            if (e.target.tagName === 'BUTTON') return;
+            const touch = e.touches[0];
+            startDrag(touch.clientX, touch.clientY);
+        }, { passive: true });
+
+        hudHeader.addEventListener('touchmove', (e) => {
+            if (!isDragging) return;
+            const touch = e.touches[0];
+            moveDrag(touch.clientX, touch.clientY);
+            e.preventDefault(); // Ngăn cuộn trang web khi đang kéo bảng HUD trên điện thoại
+        }, { passive: false });
+
+        hudHeader.addEventListener('touchend', endDrag);
     }
 
     if (hudHostElement.parentElement !== parent) {
@@ -565,7 +605,7 @@ function initOrUpdateHUD() {
     }
 }
 
-// ==================== RENDER ĐÁP ÁN ĐÃ QUA BỘ MATH RENDERER ====================
+// ==================== RENDER ĐÁP ÁN + NÚT DOUBLE CHECK ====================
 
 function showHUDAnswer(answerText, statusText, tokenText = '') {
     initOrUpdateHUD();
@@ -580,7 +620,6 @@ function showHUDAnswer(answerText, statusText, tokenText = '') {
     if (statusEl) statusEl.textContent = statusText;
     if (tokenEl && tokenText) tokenEl.textContent = tokenText;
 
-    // Render qua bộ render Toán học & Markdown
     const renderedHtml = renderMarkdownAndMath(answerText);
 
     hudBody.innerHTML = `
@@ -620,12 +659,12 @@ function showHUDAnswer(answerText, statusText, tokenText = '') {
         }
 
         btnDC.disabled = true;
-        btnDC.innerHTML = `<span>⏳</span><span>Đang gửi ảnh & soát bài...</span>`;
+        btnDC.innerHTML = `<span>⏳</span><span>Đang soát bài...</span>`;
 
         dcContainer.innerHTML = `
             <div class="hud-dc-card">
                 <div class="hud-dc-header">
-                    <span>Đang thẩm định & rà soát lại đề bài...</span>
+                    <span>Đang thẩm định đề bài...</span>
                 </div>
                 <div class="hud-loading" style="padding: 4px 0;">
                     <div class="spinner"></div>
@@ -635,23 +674,23 @@ function showHUDAnswer(answerText, statusText, tokenText = '') {
         `;
         dcContainer.scrollIntoView({ behavior: 'smooth' });
 
-        chrome.runtime.sendMessage({
+        apiBridge.runtime.sendMessage({
             type: 'PERFORM_DOUBLE_CHECK',
             dataUrl: currentCaptureData.dataUrl,
             initialAnswer: currentCaptureData.initialAnswer,
             captureId: currentCaptureData.captureId
         }, (res) => {
             btnDC.disabled = false;
-            btnDC.innerHTML = `<span>🔄</span><span>Soát lại lần nữa</span>`;
+            btnDC.innerHTML = `<span>🔄</span><span>Soát lại</span>`;
 
             if (res && res.success) {
                 const renderedDCHtml = renderMarkdownAndMath(res.answer);
                 dcContainer.innerHTML = `
                     <div class="hud-dc-card">
                         <div class="hud-dc-header">
-                            <span>✅ KẾT QUẢ SOÁT BÀI ĐỘC LẬP (${res.model || res.provider || 'AI Verified'})</span>
+                            <span>✅ KẾT QUẢ SOÁT BÀI (${res.model || res.provider || 'AI Verified'})</span>
                         </div>
-                        <div style="font-size: 13px; line-height: 1.6; color: #f8fafc;">${renderedDCHtml}</div>
+                        <div style="font-size: 12px; line-height: 1.55; color: #f8fafc;">${renderedDCHtml}</div>
                     </div>
                 `;
                 dcContainer.scrollIntoView({ behavior: 'smooth' });
@@ -687,7 +726,7 @@ function showHUDLoading(statusText, message) {
     `;
 }
 
-// ==================== NÚT NỔI CHỤP MÀN HÌNH ====================
+// ==================== NÚT NỔI CHỤP MÀN HÌNH (MOBILE & DESKTOP) ====================
 
 function createOrUpdateFloatingButton() {
     let btn = document.getElementById('capture-floating-btn');
@@ -695,39 +734,30 @@ function createOrUpdateFloatingButton() {
         btn = document.createElement('div');
         btn.id = 'capture-floating-btn';
         btn.className = 'capture-temp-ui';
-        btn.title = 'Chụp 1/3 trang & phân tích AI (Phím tắt: Alt+S)';
+        btn.title = 'Chụp 1/3 trang & phân tích AI';
         btn.style.cssText = `
             position: fixed;
-            bottom: 24px;
-            right: 24px;
-            width: 44px;
-            height: 44px;
+            bottom: 20px;
+            right: 16px;
+            width: 40px;
+            height: 40px;
             border-radius: 50%;
             background: #0f172a;
-            border: 1px solid rgba(255, 255, 255, 0.15);
+            border: 1px solid rgba(255, 255, 255, 0.2);
             color: #60a5fa;
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 19px;
+            font-size: 17px;
             cursor: pointer;
             z-index: 2147483640;
-            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.6);
             transition: all 0.2s ease;
             user-select: none;
             pointer-events: auto;
+            touch-action: manipulation;
         `;
         btn.innerHTML = '📷';
-
-        btn.addEventListener('mouseenter', () => {
-            btn.style.transform = 'scale(1.08)';
-            btn.style.borderColor = '#3b82f6';
-        });
-
-        btn.addEventListener('mouseleave', () => {
-            btn.style.transform = 'scale(1)';
-            btn.style.borderColor = 'rgba(255, 255, 255, 0.15)';
-        });
 
         btn.addEventListener('click', (e) => {
             e.stopPropagation();
@@ -758,63 +788,28 @@ window.addEventListener('keydown', function(e) {
     }
 }, true);
 
-// Double-click góc màn hình
-window.addEventListener('dblclick', function(event) {
-    const x = event.clientX;
-    const y = event.clientY;
+// Double-tap trên màn hình cảm ứng điện thoại
+window.addEventListener('touchstart', function(event) {
+    const now = Date.now();
+    const touch = event.touches[0];
     const windowWidth = window.innerWidth;
     const windowHeight = window.innerHeight;
-    
+
     const isInZone = (
-        y > windowHeight - CONFIG.triggerZone.bottom &&
-        x > windowWidth - CONFIG.triggerZone.right
+        touch.clientY > windowHeight - CONFIG.triggerZone.bottom &&
+        touch.clientX > windowWidth - CONFIG.triggerZone.right
     );
-    
+
     if (isInZone && !isProcessing) {
-        showClickIndicator(x, y);
-        resetClickCounter();
-        triggerCapture('third');
+        if (now - lastTouchTime < 380) {
+            showClickIndicator(touch.clientX, touch.clientY);
+            triggerCapture('third');
+            lastTouchTime = 0;
+            return;
+        }
+        lastTouchTime = now;
     }
-}, true);
-
-window.addEventListener('click', function(event) {
-    const x = event.clientX;
-    const y = event.clientY;
-    const windowWidth = window.innerWidth;
-    const windowHeight = window.innerHeight;
-    
-    const isInZone = (
-        y > windowHeight - CONFIG.triggerZone.bottom &&
-        x > windowWidth - CONFIG.triggerZone.right
-    );
-    
-    if (event.target.closest('#capture-floating-btn')) return;
-    
-    if (!isInZone || isProcessing) {
-        if (!isInZone) resetClickCounter();
-        return;
-    }
-    
-    clickCounter++;
-    if (clickTimer) clearTimeout(clickTimer);
-    showClickIndicator(x, y);
-
-    if (clickCounter >= CONFIG.clickCount) {
-        resetClickCounter();
-        triggerCapture('third');
-        return;
-    }
-    
-    clickTimer = setTimeout(() => { resetClickCounter(); }, CONFIG.clickTimeout);
-}, true);
-
-function resetClickCounter() {
-    clickCounter = 0;
-    if (clickTimer) {
-        clearTimeout(clickTimer);
-        clickTimer = null;
-    }
-}
+}, { passive: true });
 
 function showClickIndicator(x, y) {
     const indicator = document.createElement('div');
@@ -860,11 +855,11 @@ async function triggerCapture(mode = 'third') {
     try {
         const response = await new Promise((resolve, reject) => {
             try {
-                chrome.runtime.sendMessage({
+                apiBridge.runtime.sendMessage({
                     type: 'CAPTURE_FULL_PAGE_NATIVE',
                     mode: mode
                 }, (res) => {
-                    if (chrome.runtime.lastError) reject(new Error(chrome.runtime.lastError.message));
+                    if (apiBridge.runtime.lastError) reject(new Error(apiBridge.runtime.lastError.message));
                     else resolve(res);
                 });
             } catch (err) {
@@ -896,14 +891,14 @@ async function triggerCapture(mode = 'third') {
             geminiAnswer: null
         };
 
-        chrome.runtime.sendMessage({
+        apiBridge.runtime.sendMessage({
             type: 'NEW_CAPTURE',
             payload: result
         });
 
         showHUDLoading('Đang giải đề...', 'Đã chụp xong, đang gửi dữ liệu cho AI giải bài...');
 
-        chrome.runtime.sendMessage({
+        apiBridge.runtime.sendMessage({
             type: 'ANALYZE_WITH_AI',
             dataUrl: response.dataUrl,
             captureId: captureId
@@ -934,16 +929,18 @@ async function triggerCapture(mode = 'third') {
     }
 }
 
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-    if (message.type === 'TRIGGER_CAPTURE') {
-        triggerCapture(message.mode || 'third').then(() => {
-            sendResponse({ success: true });
-        }).catch(err => {
-            sendResponse({ success: false, error: err.message });
-        });
-        return true;
-    }
-});
+if (apiBridge && apiBridge.runtime && apiBridge.runtime.onMessage) {
+    apiBridge.runtime.onMessage.addListener((message, sender, sendResponse) => {
+        if (message.type === 'TRIGGER_CAPTURE') {
+            triggerCapture(message.mode || 'third').then(() => {
+                sendResponse({ success: true });
+            }).catch(err => {
+                sendResponse({ success: false, error: err.message });
+            });
+            return true;
+        }
+    });
+}
 
 createOrUpdateFloatingButton();
 initOrUpdateHUD();
