@@ -1,6 +1,6 @@
-// content.js - Tương thích hoàn hảo trên Máy tính & Điện thoại (Kiwi / Chrome / Firefox)
+// content.js - Tương thích hoàn hảo trên Máy tính & Điện thoại (100% Native Chrome Engine)
 
-console.log('%c📸 Screen Capture AI HUD (Dual Engine: Native + DOM Canvas Fallback)', 'color:#3b82f6;font-size:13px;font-weight:600;');
+console.log('%c📸 Screen Capture AI HUD (100% Pure Native Engine)', 'color:#3b82f6;font-size:13px;font-weight:600;');
 
 const apiBridge = (typeof chrome !== 'undefined' && chrome.runtime) ? chrome : (typeof browser !== 'undefined' ? browser : null);
 
@@ -142,50 +142,6 @@ function renderMarkdownAndMath(text) {
     if (inList) newLines.push('</ul>');
 
     return newLines.join('');
-}
-
-// ==================== BỘ CHỤP DOM CANVAS DỰ PHÒNG CHO KIWI FULLSCREEN ====================
-
-async function captureWithDOMFallback(mode = 'third') {
-    document.querySelectorAll('.capture-temp-ui').forEach(el => {
-        el.style.opacity = '0';
-    });
-
-    try {
-        if (typeof html2canvas === 'function') {
-            const targetEl = document.fullscreenElement || document.webkitFullscreenElement || document.body || document.documentElement;
-            const scrollY = window.scrollY || window.pageYOffset || 0;
-            const windowH = window.innerHeight;
-            const scrollH = targetEl.scrollHeight || document.documentElement.scrollHeight;
-            
-            let captureH = windowH;
-            if (mode === 'third') {
-                captureH = Math.max(windowH, Math.min(Math.round(scrollH / 3), windowH * 2));
-            }
-
-            const canvas = await html2canvas(targetEl, {
-                useCORS: true,
-                allowTaint: true,
-                logging: false,
-                scale: Math.min(window.devicePixelRatio || 1.5, 2),
-                y: scrollY,
-                height: captureH,
-                windowHeight: captureH,
-                ignoreElements: (el) => {
-                    return el.classList && el.classList.contains('capture-temp-ui');
-                }
-            });
-
-            return canvas.toDataURL('image/jpeg', 0.88);
-        }
-    } catch (e) {
-        console.warn('Lỗi html2canvas fallback:', e);
-    } finally {
-        document.querySelectorAll('.capture-temp-ui').forEach(el => {
-            el.style.opacity = '1';
-        });
-    }
-    return null;
 }
 
 // ==================== TẠO FLOATING HUD (CLOSED SHADOW DOM) ====================
@@ -583,7 +539,6 @@ function initOrUpdateHUD() {
             btnMinimize.textContent = hudContainer.classList.contains('minimized') ? '◻' : '━';
         });
 
-        // HỖ TRỢ KÉO THẢ TRÊN CẢ CHUỘT VÀ CẢM ỨNG
         let isDragging = false;
         let startX, startY, initialLeft, initialTop;
 
@@ -829,7 +784,7 @@ window.addEventListener('keydown', function(e) {
     }
 }, true);
 
-// Double-tap trên màn hình cảm ứng điện thoại
+// Double-tap trên màn hình cảm ứng
 window.addEventListener('touchstart', function(event) {
     const now = Date.now();
     const touch = event.touches[0];
@@ -880,7 +835,7 @@ function showClickIndicator(x, y) {
     setTimeout(() => { indicator.remove(); }, 380);
 }
 
-// ==================== TRIGGER CAPTURE & AI (TỰ ĐỘNG CHUYỂN DOM CANVAS NẾU NATIVE LỖI) ====================
+// ==================== TRIGGER CAPTURE & AI (100% NATIVE API) ====================
 
 async function triggerCapture(mode = 'third') {
     if (isProcessing) return;
@@ -891,42 +846,24 @@ async function triggerCapture(mode = 'third') {
     }
 
     isProcessing = true;
-    showHUDLoading('Đang chụp...', 'Đang chụp nội dung bài tập...');
+    showHUDLoading('Đang chụp...', 'Đang cuộn và chụp khung hình bài tập...');
     
     try {
-        let dataUrl = null;
-
-        // 1. Thử chụp bằng Native API
-        try {
-            const response = await new Promise((resolve) => {
-                apiBridge.runtime.sendMessage({
-                    type: 'CAPTURE_FULL_PAGE_NATIVE',
-                    mode: mode
-                }, (res) => {
-                    if (apiBridge.runtime.lastError) {
-                        resolve({ success: false, error: apiBridge.runtime.lastError.message });
-                    } else {
-                        resolve(res || { success: false });
-                    }
-                });
+        const response = await new Promise((resolve) => {
+            apiBridge.runtime.sendMessage({
+                type: 'CAPTURE_FULL_PAGE_NATIVE',
+                mode: mode
+            }, (res) => {
+                if (apiBridge.runtime.lastError) {
+                    resolve({ success: false, error: apiBridge.runtime.lastError.message });
+                } else {
+                    resolve(res || { success: false });
+                }
             });
+        });
 
-            if (response && response.success && response.dataUrl) {
-                dataUrl = response.dataUrl;
-            }
-        } catch (nativeErr) {
-            console.warn('Native capture failed:', nativeErr);
-        }
-
-        // 2. Nếu Native Capture bị lỗi "No active web contents to capture" (đặc trưng của Kiwi Mobile Fullscreen)
-        // -> Tự động kích hoạt bộ chụp Canvas nội trang siêu tốc!
-        if (!dataUrl) {
-            showHUDLoading('Đang chụp...', 'Đang chụp qua bộ xử lý Canvas...');
-            dataUrl = await captureWithDOMFallback(mode);
-        }
-
-        if (!dataUrl) {
-            throw new Error('Không thể chụp được nội dung trang web. Vui lòng thử lại!');
+        if (!response?.success || !response?.dataUrl) {
+            throw new Error(response?.error || 'Lỗi khi chụp trang bằng Native API');
         }
 
         const now = new Date();
@@ -934,13 +871,13 @@ async function triggerCapture(mode = 'third') {
         const filename = `capture_${timestamp}.png`;
         const captureId = 'cap_' + Date.now();
 
-        currentCaptureData.dataUrl = dataUrl;
+        currentCaptureData.dataUrl = response.dataUrl;
         currentCaptureData.captureId = captureId;
         currentCaptureData.initialAnswer = null;
 
         const result = {
             id: captureId,
-            image: dataUrl,
+            image: response.dataUrl,
             filename: filename,
             timestamp: now.toISOString(),
             pageUrl: window.location.href,
@@ -958,7 +895,7 @@ async function triggerCapture(mode = 'third') {
 
         apiBridge.runtime.sendMessage({
             type: 'ANALYZE_WITH_AI',
-            dataUrl: dataUrl,
+            dataUrl: response.dataUrl,
             captureId: captureId
         }, (res) => {
             if (res && res.success) {

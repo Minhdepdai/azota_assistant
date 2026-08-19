@@ -1,6 +1,6 @@
-// background.js - Tương thích kép 100% Chromium (Kiwi / Chrome / Edge) và Gecko (Firefox Android / Desktop)
+// background.js - 100% Thuần Native Chrome Capture (Cuộn dài nhiều khung hình trên cả Kiwi Browser và PC)
 
-console.log('📸 Background service worker started (Universal Engine: Kiwi + Firefox Ready)');
+console.log('📸 Background service worker started (100% Pure Native Long-Scroll Engine)');
 
 const api = (typeof browser !== 'undefined' && browser.runtime) ? browser : chrome;
 
@@ -17,7 +17,7 @@ api.storage.local.get('captureHistory', (data) => {
     }
 });
 
-// ==================== UNIVERSAL HELPERS CHO KIWI & FIREFOX ====================
+// ==================== UNIVERSAL HELPERS ====================
 
 async function executeScriptUniversal(tabId, func, args = []) {
     if (api.scripting && api.scripting.executeScript) {
@@ -40,7 +40,7 @@ async function executeScriptUniversal(tabId, func, args = []) {
     throw new Error('Trình duyệt không hỗ trợ scripting API');
 }
 
-// BỘ CHỤP NATIVE TỰ TÌM WINDOW ID (FIX TRIỆT ĐỂ LỖI 'No active web contents' TRÊN KIWI BROWSER)
+// BỘ CHỤP NATIVE TỰ ĐỘNG NHẬN DIỆN WINDOW ID TRÊN ANDROID/KIWI
 function captureTabUniversal(targetWindowId = null) {
     return new Promise(async (resolve, reject) => {
         const captureFn = (api.tabs && api.tabs.captureVisibleTab) ? api.tabs.captureVisibleTab.bind(api.tabs) : null;
@@ -49,15 +49,12 @@ function captureTabUniversal(targetWindowId = null) {
             return;
         }
 
-        // Danh sách các windowId ứng viên để thử nghiệm
         const candidateWindowIds = [];
 
-        // 1. windowId được truyền trực tiếp từ sender.tab
         if (targetWindowId !== null && targetWindowId !== undefined) {
             candidateWindowIds.push(targetWindowId);
         }
 
-        // 2. windowId lấy từ active tab
         try {
             const activeTabs = await api.tabs.query({ active: true });
             if (activeTabs) {
@@ -69,21 +66,6 @@ function captureTabUniversal(targetWindowId = null) {
             }
         } catch (e) {}
 
-        // 3. windowId lấy từ windows API
-        try {
-            if (api.windows && api.windows.getAll) {
-                const wins = await api.windows.getAll();
-                if (wins) {
-                    wins.forEach(w => {
-                        if (w.id !== undefined && !candidateWindowIds.includes(w.id)) {
-                            candidateWindowIds.push(w.id);
-                        }
-                    });
-                }
-            }
-        } catch (e) {}
-
-        // 4. Null fallback (cho Desktop Chrome / Firefox)
         candidateWindowIds.push(null);
 
         let lastErr = null;
@@ -114,7 +96,7 @@ function captureTabUniversal(targetWindowId = null) {
             }
         }
 
-        reject(lastErr || new Error('No active web contents to capture'));
+        reject(lastErr || new Error('Không thể chụp được khung hình'));
     });
 }
 
@@ -164,11 +146,11 @@ async function stitchCaptures(captures, totalWidth, totalHeight, dpr) {
     return `data:image/png;base64,${btoa(binary)}`;
 }
 
-// Chụp cuộn trang Native 100% với windowId chỉ định
+// ==================== BỘ CUỘN DÀI NATIVE THỰC SỰ (LONG MULTI-SLICE SCROLLER) ====================
+
 async function captureScrollNative(tabId, mode = 'third', initialWindowId = null) {
     let originalScrollX = 0, originalScrollY = 0;
     
-    // Lấy chính xác windowId của tab từ hệ thống
     let targetWinId = initialWindowId;
     try {
         const tabInfo = await api.tabs.get(tabId);
@@ -178,60 +160,69 @@ async function captureScrollNative(tabId, mode = 'third', initialWindowId = null
     } catch (e) {}
 
     try {
+        // Thu thập thông số kích thước và tìm khung cuộn thực tế (hỗ trợ cả Azota container cuộn riêng)
         const dim = await executeScriptUniversal(tabId, () => {
             const clientWidth = document.documentElement.clientWidth || window.innerWidth;
-            const scrollHeight = Math.max(
+            
+            // Tìm phần tử cuộn lớn nhất trong trang (dành cho app single-page/Azota)
+            let maxScrollH = Math.max(
                 document.documentElement.scrollHeight,
                 document.body.scrollHeight,
                 window.innerHeight
             );
-            const isFull = !!(document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement);
+
+            let innerScrollTarget = null;
+            const scrollables = document.querySelectorAll('div, section, main, article, [role="main"]');
+            for (const el of scrollables) {
+                if (el.scrollHeight > maxScrollH && el.clientHeight > 300) {
+                    const ov = window.getComputedStyle(el).overflowY;
+                    if (ov === 'auto' || ov === 'scroll' || ov === 'visible') {
+                        maxScrollH = el.scrollHeight;
+                        innerScrollTarget = true;
+                    }
+                }
+            }
+
             return {
                 viewportWidth: window.innerWidth,
                 viewportHeight: window.innerHeight,
                 totalWidth: clientWidth,
-                totalHeight: scrollHeight,
+                totalHeight: maxScrollH,
                 dpr: window.devicePixelRatio || 1,
                 originalScrollX: window.scrollX || 0,
                 originalScrollY: window.scrollY || 0,
-                isFullscreen: isFull
+                hasInnerScroll: !!innerScrollTarget
             };
         });
 
         if (!dim) throw new Error('Không thể lấy kích thước trang web');
 
-        const { viewportWidth, viewportHeight, totalWidth, totalHeight, dpr, isFullscreen } = dim;
+        const { viewportWidth, viewportHeight, totalWidth, totalHeight, dpr } = dim;
         originalScrollX = dim.originalScrollX;
         originalScrollY = dim.originalScrollY;
-
-        // Nếu ở chế độ Fullscreen hoặc trang cố định không cuộn
-        if (isFullscreen || totalHeight <= viewportHeight + 10) {
-            await executeScriptUniversal(tabId, () => {
-                document.querySelectorAll('.capture-temp-ui').forEach(el => {
-                    el.style.opacity = '0';
-                });
-            });
-
-            await new Promise(r => setTimeout(r, 120));
-            const singleCap = await captureTabUniversal(targetWinId);
-            return singleCap;
-        }
 
         let startY = originalScrollY;
         let targetCaptureHeight = totalHeight;
 
+        // Tính toán độ dài cuộn thực sự theo ý muốn của người dùng
         if (mode === 'third') {
+            // Chụp ít nhất 2 đến 3 màn hình cuộn để bao quát toàn bộ câu hỏi và các đáp án A B C D
             const oneThird = Math.round(totalHeight / 3);
-            targetCaptureHeight = Math.min(oneThird, totalHeight - startY);
-            targetCaptureHeight = Math.max(targetCaptureHeight, Math.min(viewportHeight, totalHeight - startY));
+            const multiScreens = Math.round(viewportHeight * 2.8);
+            targetCaptureHeight = Math.max(multiScreens, oneThird);
+            targetCaptureHeight = Math.min(targetCaptureHeight, totalHeight - startY);
+            targetCaptureHeight = Math.max(targetCaptureHeight, Math.min(viewportHeight, totalHeight));
         } else if (mode === 'visible') {
             targetCaptureHeight = Math.min(viewportHeight, totalHeight - startY);
+        } else if (mode === 'full') {
+            targetCaptureHeight = totalHeight - startY;
         }
 
         const captures = [];
         let currentY = startY;
         let accumulatedHeight = 0;
 
+        // Tiến hành chụp cuộn từng khung hình và ghép lại
         while (accumulatedHeight < targetCaptureHeight) {
             const isFirstSlice = (accumulatedHeight === 0);
             const remainingHeight = targetCaptureHeight - accumulatedHeight;
@@ -248,14 +239,28 @@ async function captureScrollNative(tabId, mode = 'third', initialWindowId = null
                 }
             }
 
+            // Thực hiện cuộn trên trang
             await executeScriptUniversal(tabId, (y, isFirst) => {
                 window.scrollTo(0, y);
+                document.documentElement.scrollTop = y;
+                document.body.scrollTop = y;
+
+                // Cuộn cả container bên trong nếu có
+                const scrollables = document.querySelectorAll('div, section, main, article, [role="main"]');
+                for (const el of scrollables) {
+                    if (el.scrollHeight > window.innerHeight && el.clientHeight > 300) {
+                        el.scrollTop = y;
+                    }
+                }
+
                 window.dispatchEvent(new Event('scroll'));
 
+                // Tạm ẩn HUD bằng opacity trong tích tắc để chụp
                 document.querySelectorAll('.capture-temp-ui').forEach(el => {
                     el.style.opacity = '0';
                 });
 
+                // Chỉ ẩn tạm header/nav nhỏ, không ẩn container bài tập
                 const headers = document.querySelectorAll('header, nav, [role="banner"]');
                 headers.forEach(el => {
                     if (!isFirst) {
@@ -265,7 +270,8 @@ async function captureScrollNative(tabId, mode = 'third', initialWindowId = null
                 });
             }, [scrollY, isFirstSlice]);
 
-            await new Promise(r => setTimeout(r, 260));
+            // Chờ GPU render lại khung hình
+            await new Promise(r => setTimeout(r, 280));
 
             const dataUrl = await captureTabUniversal(targetWinId);
 
@@ -287,20 +293,37 @@ async function captureScrollNative(tabId, mode = 'third', initialWindowId = null
             }
         }
 
+        if (captures.length === 0) {
+            throw new Error('Không thể chụp được khung hình nào');
+        }
+
         if (captures.length === 1) {
             return captures[0].dataUrl;
         }
 
+        // Ghép toàn bộ các lát cắt thành 1 bức ảnh dài hoàn chỉnh
         return await stitchCaptures(captures, totalWidth, targetCaptureHeight, dpr);
 
     } finally {
+        // Luôn luôn phục hồi lại vị trí cuộn và giao diện trang
         try {
             await executeScriptUniversal(tabId, (origX, origY) => {
                 window.scrollTo(origX, origY);
+                document.documentElement.scrollTop = origY;
+                document.body.scrollTop = origY;
+
+                const scrollables = document.querySelectorAll('div, section, main, article, [role="main"]');
+                for (const el of scrollables) {
+                    if (el.scrollHeight > window.innerHeight && el.clientHeight > 300) {
+                        el.scrollTop = origY;
+                    }
+                }
+
                 document.querySelectorAll('.capture-temp-ui').forEach(el => {
                     el.style.opacity = '1';
                     el.style.display = '';
                 });
+
                 document.querySelectorAll('header, nav, [role="banner"]').forEach(el => {
                     if (el.dataset.prevVis) {
                         el.style.visibility = el.dataset.prevVis === 'visible' ? '' : el.dataset.prevVis;
@@ -783,4 +806,4 @@ api.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return false;
 });
 
-console.log('✅ Background ready with Native Window Targeting for Kiwi Browser!');
+console.log('✅ Background ready with 100% Pure Native Long-Scroll Engine!');
