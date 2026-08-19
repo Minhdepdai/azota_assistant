@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Azota AI Assistant - Smart Screen Capture & Study Solver",
-  "version": "1.3.1",
-  "description": "Trợ lý học tập thông minh: Chụp màn hình cuộn, phân tích bài tập và đối chiếu đáp án với Google Gemini và OpenAI API trên máy tính & điện thoại (Kiwi / Chrome / Firefox).",
+  "version": "1.3.2",
+  "description": "Trợ lý học tập thông minh: Chụp màn hình cuộn, phân tích bài tập và đối chiếu đáp án với Google Gemini và OpenAI API (Tương thích đồng thời Kiwi Browser, Firefox Mobile, Chrome & Edge).",
   "permissions": [
     "activeTab",
     "storage",

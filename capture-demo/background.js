@@ -1,6 +1,8 @@
-// background.js - Hỗ trợ cả Google Gemini & OpenAI Compatible + Tính năng Double Check Soát bài
+// background.js - Tương thích kép 100% Chromium (Kiwi / Chrome / Edge) và Gecko (Firefox Android / Desktop)
 
-console.log('📸 Background service worker started (Unified AI Engine + Double Check Ready)');
+console.log('📸 Background service worker started (Universal Engine: Kiwi + Firefox Ready)');
+
+const api = (typeof browser !== 'undefined' && browser.runtime) ? browser : chrome;
 
 let captureHistory = [];
 let currentGeminiKeyIndex = 0;
@@ -9,11 +11,74 @@ let currentOpenAIKeyIndex = 0;
 const DEFAULT_DOUBLE_CHECK_PROMPT = `Bạn là chuyên gia thẩm định và soát bài cấp cao. Dưới đây là ảnh chụp đề bài gốc và Lời giải sơ bộ số 1 từ AI:\n\n--- [LỜI GIẢI SƠ BỘ] ---\n{INITIAL_ANSWER}\n----------------------\n\nHãy đọc kỹ từng câu chữ, hình vẽ, số liệu trong ảnh và soát xét lại từng bước giải trên. Chỉ ra lời giải trước có đúng 100% không, có bị dính bẫy hay sai sót nào không. Cuối cùng, hãy đưa ra đáp án chính xác và chắc chắn nhất.`;
 
 // Nạp history từ storage khi worker khởi động
-chrome.storage.local.get('captureHistory', (data) => {
-    if (data.captureHistory) {
+api.storage.local.get('captureHistory', (data) => {
+    if (data && data.captureHistory) {
         captureHistory = data.captureHistory;
     }
 });
+
+// ==================== UNIVERSAL HELPERS CHO KIWI & FIREFOX ====================
+
+async function executeScriptUniversal(tabId, func, args = []) {
+    if (api.scripting && api.scripting.executeScript) {
+        const results = await api.scripting.executeScript({
+            target: { tabId },
+            func: func,
+            args: args
+        });
+        return results && results[0] ? results[0].result : null;
+    } else if (api.tabs && api.tabs.executeScript) {
+        const code = `(${func.toString()})(${args.map(a => JSON.stringify(a)).join(',')})`;
+        const results = await new Promise((resolve, reject) => {
+            api.tabs.executeScript(tabId, { code }, (res) => {
+                if (api.runtime.lastError) reject(new Error(api.runtime.lastError.message));
+                else resolve(res);
+            });
+        });
+        return results && results[0] !== undefined ? results[0] : null;
+    }
+    throw new Error('Trình duyệt không hỗ trợ scripting API');
+}
+
+function captureTabUniversal(windowId = null) {
+    return new Promise((resolve, reject) => {
+        try {
+            const captureFn = (api.tabs && api.tabs.captureVisibleTab) ? api.tabs.captureVisibleTab.bind(api.tabs) : null;
+            if (!captureFn) {
+                reject(new Error('Trình duyệt không hỗ trợ captureVisibleTab'));
+                return;
+            }
+
+            const winArg = windowId || null;
+            const res = captureFn(winArg, { format: 'png' }, (dataUrl) => {
+                if (api.runtime.lastError) {
+                    // Thử lại không truyền windowId (dành cho Firefox Mobile)
+                    try {
+                        captureFn({ format: 'png' }, (dataUrl2) => {
+                            if (api.runtime.lastError || !dataUrl2) {
+                                reject(new Error(api.runtime.lastError?.message || 'Lỗi chụp màn hình'));
+                            } else {
+                                resolve(dataUrl2);
+                            }
+                        });
+                    } catch (e2) {
+                        reject(new Error(api.runtime.lastError?.message || e2.message));
+                    }
+                } else if (!dataUrl) {
+                    reject(new Error('Không lấy được dữ liệu ảnh chụp'));
+                } else {
+                    resolve(dataUrl);
+                }
+            });
+
+            if (res && typeof res.then === 'function') {
+                res.then(resolve).catch(reject);
+            }
+        } catch (err) {
+            reject(err);
+        }
+    });
+}
 
 // Ghép các slice ảnh lại OffscreenCanvas
 async function stitchCaptures(captures, totalWidth, totalHeight, dpr) {
@@ -61,30 +126,29 @@ async function stitchCaptures(captures, totalWidth, totalHeight, dpr) {
     return `data:image/png;base64,${btoa(binary)}`;
 }
 
-// Chụp cuộn trang Native
+// Chụp cuộn trang Native (Hoạt động tốt trên cả Kiwi và Firefox)
 async function captureScrollNative(tabId, mode = 'third') {
-    const [dim] = await chrome.scripting.executeScript({
-        target: { tabId },
-        func: () => {
-            const clientWidth = document.documentElement.clientWidth || window.innerWidth;
-            const scrollHeight = Math.max(
-                document.documentElement.scrollHeight,
-                document.body.scrollHeight,
-                window.innerHeight
-            );
-            return {
-                viewportWidth: window.innerWidth,
-                viewportHeight: window.innerHeight,
-                totalWidth: clientWidth,
-                totalHeight: scrollHeight,
-                dpr: window.devicePixelRatio || 1,
-                originalScrollX: window.scrollX || 0,
-                originalScrollY: window.scrollY || 0
-            };
-        }
+    const dim = await executeScriptUniversal(tabId, () => {
+        const clientWidth = document.documentElement.clientWidth || window.innerWidth;
+        const scrollHeight = Math.max(
+            document.documentElement.scrollHeight,
+            document.body.scrollHeight,
+            window.innerHeight
+        );
+        return {
+            viewportWidth: window.innerWidth,
+            viewportHeight: window.innerHeight,
+            totalWidth: clientWidth,
+            totalHeight: scrollHeight,
+            dpr: window.devicePixelRatio || 1,
+            originalScrollX: window.scrollX || 0,
+            originalScrollY: window.scrollY || 0
+        };
     });
 
-    const { viewportWidth, viewportHeight, totalWidth, totalHeight, dpr, originalScrollX, originalScrollY } = dim.result;
+    if (!dim) throw new Error('Không thể lấy kích thước trang web');
+
+    const { viewportWidth, viewportHeight, totalWidth, totalHeight, dpr, originalScrollX, originalScrollY } = dim;
 
     let startY = 0;
     let targetCaptureHeight = totalHeight;
@@ -119,41 +183,35 @@ async function captureScrollNative(tabId, mode = 'third') {
             }
         }
 
-        await chrome.scripting.executeScript({
-            target: { tabId },
-            args: [scrollY, isFirstSlice],
-            func: (y, isFirst) => {
-                window.scrollTo(0, y);
-                window.dispatchEvent(new Event('scroll'));
+        await executeScriptUniversal(tabId, (y, isFirst) => {
+            window.scrollTo(0, y);
+            window.dispatchEvent(new Event('scroll'));
 
-                document.querySelectorAll('.capture-temp-ui').forEach(el => el.style.display = 'none');
+            document.querySelectorAll('.capture-temp-ui').forEach(el => el.style.display = 'none');
 
-                const allElements = document.querySelectorAll('*');
-                for (const el of allElements) {
-                    if (el.classList.contains('capture-temp-ui')) continue;
-                    const style = window.getComputedStyle(el);
-                    if (style.position === 'fixed' || style.position === 'sticky') {
-                        if (!isFirst) {
-                            if (!el.dataset.prevVis) {
-                                el.dataset.prevVis = el.style.visibility || 'visible';
-                            }
-                            el.style.visibility = 'hidden';
-                        } else {
-                            if (el.dataset.prevVis) {
-                                el.style.visibility = el.dataset.prevVis === 'visible' ? '' : el.dataset.prevVis;
-                                delete el.dataset.prevVis;
-                            }
+            const allElements = document.querySelectorAll('*');
+            for (const el of allElements) {
+                if (el.classList.contains('capture-temp-ui')) continue;
+                const style = window.getComputedStyle(el);
+                if (style.position === 'fixed' || style.position === 'sticky') {
+                    if (!isFirst) {
+                        if (!el.dataset.prevVis) {
+                            el.dataset.prevVis = el.style.visibility || 'visible';
+                        }
+                        el.style.visibility = 'hidden';
+                    } else {
+                        if (el.dataset.prevVis) {
+                            el.style.visibility = el.dataset.prevVis === 'visible' ? '' : el.dataset.prevVis;
+                            delete el.dataset.prevVis;
                         }
                     }
                 }
             }
-        });
+        }, [scrollY, isFirstSlice]);
 
-        await new Promise(r => setTimeout(r, 280));
+        await new Promise(r => setTimeout(r, 260));
 
-        const dataUrl = await new Promise(resolve => {
-            chrome.tabs.captureVisibleTab(null, { format: 'png' }, resolve);
-        });
+        const dataUrl = await captureTabUniversal(null);
 
         if (dataUrl) {
             captures.push({
@@ -173,22 +231,18 @@ async function captureScrollNative(tabId, mode = 'third') {
         }
     }
 
-    await chrome.scripting.executeScript({
-        target: { tabId },
-        args: [originalScrollX, originalScrollY],
-        func: (x, y) => {
-            window.scrollTo(x, y);
-            document.querySelectorAll('.capture-temp-ui').forEach(el => el.style.display = '');
+    await executeScriptUniversal(tabId, (x, y) => {
+        window.scrollTo(x, y);
+        document.querySelectorAll('.capture-temp-ui').forEach(el => el.style.display = '');
 
-            const allElements = document.querySelectorAll('*');
-            for (const el of allElements) {
-                if (el.dataset.prevVis) {
-                    el.style.visibility = el.dataset.prevVis === 'visible' ? '' : el.dataset.prevVis;
-                    delete el.dataset.prevVis;
-                }
+        const allElements = document.querySelectorAll('*');
+        for (const el of allElements) {
+            if (el.dataset.prevVis) {
+                el.style.visibility = el.dataset.prevVis === 'visible' ? '' : el.dataset.prevVis;
+                delete el.dataset.prevVis;
             }
         }
-    });
+    }, [originalScrollX, originalScrollY]);
 
     return await stitchCaptures(captures, totalWidth, targetCaptureHeight, dpr);
 }
@@ -196,7 +250,7 @@ async function captureScrollNative(tabId, mode = 'third') {
 // ==================== CẬP NHẬT BỘ ĐẾM TOKEN ====================
 
 async function recordTokenUsage(promptTokens, candidateTokens, totalTokens) {
-    const data = await chrome.storage.local.get('tokenStats');
+    const data = await api.storage.local.get('tokenStats');
     const stats = data.tokenStats || {
         totalTokens: 0,
         promptTokens: 0,
@@ -213,7 +267,7 @@ async function recordTokenUsage(promptTokens, candidateTokens, totalTokens) {
     stats.totalTokens += t;
     stats.totalRequests += 1;
 
-    await chrome.storage.local.set({ tokenStats: stats });
+    await api.storage.local.set({ tokenStats: stats });
 }
 
 // ==================== NÉN & TỐI ƯU ẢNH TRƯỚC KHI GỬI AI ====================
@@ -274,7 +328,7 @@ function getGeminiModelCandidates(selectedModel) {
     ];
 }
 
-// ==================== 1. GỌI GOOGLE GEMINI VISION API ====================
+// ==================== GỌI GOOGLE GEMINI VISION API ====================
 
 async function callGeminiVision(optimizedImage, prompt, config, overrideModel = null) {
     let keys = config.geminiApiKeys;
@@ -365,7 +419,7 @@ async function callGeminiVision(optimizedImage, prompt, config, overrideModel = 
     throw new Error(`Gemini: ${lastError?.message || 'Không kết nối được'}`);
 }
 
-// ==================== 2. GỌI OPENAI COMPATIBLE VISION API ====================
+// ==================== GỌI OPENAI COMPATIBLE VISION API ====================
 
 async function callOpenAIVision(optimizedImage, prompt, config, overrideModel = null) {
     let keys = config.openaiApiKeys;
@@ -452,10 +506,10 @@ async function callOpenAIVision(optimizedImage, prompt, config, overrideModel = 
     throw new Error(`OpenAI Compatible: ${lastError?.message || 'Không kết nối được'}`);
 }
 
-// ==================== 3. DISPATCHER GỌI AI THEO PROVIDER ====================
+// ==================== DISPATCHER GỌI AI ====================
 
 async function callUnifiedAI(imageDataUrl, customPrompt) {
-    const config = await chrome.storage.local.get([
+    const config = await api.storage.local.get([
         'aiProvider',
         'geminiApiKeys',
         'geminiApiKey',
@@ -480,10 +534,10 @@ async function callUnifiedAI(imageDataUrl, customPrompt) {
     }
 }
 
-// ==================== 4. THỰC HIỆN DOUBLE CHECK (SOÁT BÀI) ====================
+// ==================== THỰC HIỆN DOUBLE CHECK (SOÁT BÀI) ====================
 
 async function performDoubleCheck(imageDataUrl, initialAnswer) {
-    const config = await chrome.storage.local.get([
+    const config = await api.storage.local.get([
         'aiProvider',
         'geminiApiKeys',
         'geminiApiKey',
@@ -521,61 +575,62 @@ async function performDoubleCheck(imageDataUrl, initialAnswer) {
 
 // ==================== PHÍM TẮT TOÀN CỤC (ALT+SHIFT+S) ====================
 
-chrome.commands.onCommand.addListener((command) => {
-    if (command === 'quick_capture') {
-        chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-            if (tabs && tabs[0] && tabs[0].id) {
-                const tab = tabs[0];
-                captureScrollNative(tab.id, 'third').then(async (dataUrl) => {
-                    const now = new Date();
-                    const timestamp = now.toISOString().replace(/[:.]/g, '-');
-                    const filename = `capture_${timestamp}.png`;
+if (api.commands && api.commands.onCommand) {
+    api.commands.onCommand.addListener((command) => {
+        if (command === 'quick_capture') {
+            api.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+                if (tabs && tabs[0] && tabs[0].id) {
+                    const tab = tabs[0];
+                    captureScrollNative(tab.id, 'third').then(async (dataUrl) => {
+                        const now = new Date();
+                        const timestamp = now.toISOString().replace(/[:.]/g, '-');
+                        const filename = `capture_${timestamp}.png`;
 
-                    const result = {
-                        id: 'cap_' + Date.now(),
-                        image: dataUrl,
-                        filename: filename,
-                        timestamp: now.toISOString(),
-                        pageUrl: tab.url,
-                        pageTitle: tab.title || 'Untitled',
-                        mode: 'native-third',
-                        geminiAnswer: null,
-                        geminiUsage: null,
-                        doubleCheckAnswer: null
-                    };
+                        const result = {
+                            id: 'cap_' + Date.now(),
+                            image: dataUrl,
+                            filename: filename,
+                            timestamp: now.toISOString(),
+                            pageUrl: tab.url,
+                            pageTitle: tab.title || 'Untitled',
+                            mode: 'native-third',
+                            geminiAnswer: null,
+                            geminiUsage: null,
+                            doubleCheckAnswer: null
+                        };
 
-                    const settings = await chrome.storage.local.get(['geminiAutoAnalyze']);
-                    if (settings.geminiAutoAnalyze) {
-                        try {
-                            const res = await callUnifiedAI(dataUrl);
-                            result.geminiAnswer = res.answer;
-                            result.geminiUsage = res.usage;
-                            result.aiProvider = res.provider;
-                            result.aiModel = res.model;
-                        } catch (err) {
-                            console.warn('Lỗi auto-analyze:', err);
+                        const settings = await api.storage.local.get(['geminiAutoAnalyze']);
+                        if (settings.geminiAutoAnalyze) {
+                            try {
+                                const res = await callUnifiedAI(dataUrl);
+                                result.geminiAnswer = res.answer;
+                                result.geminiUsage = res.usage;
+                                result.aiProvider = res.provider;
+                                result.aiModel = res.model;
+                            } catch (err) {
+                                console.warn('Lỗi auto-analyze:', err);
+                            }
                         }
-                    }
 
-                    captureHistory.unshift(result);
-                    chrome.storage.local.set({
-                        lastCapture: result,
-                        captureHistory: captureHistory.slice(0, 50)
+                        captureHistory.unshift(result);
+                        api.storage.local.set({
+                            lastCapture: result,
+                            captureHistory: captureHistory.slice(0, 50)
+                        });
+                    }).catch(err => {
+                        console.error('Lỗi phím tắt capture:', err);
                     });
-                }).catch(err => {
-                    console.error('Lỗi phím tắt capture:', err);
-                });
-            }
-        });
-    }
-});
+                }
+            });
+        }
+    });
+}
 
-// ==================== GIAO TIẾP TIN NHẮN (TOP-LEVEL SYNC LISTENER) ====================
+// ==================== GIAO TIẾP TIN NHẮN ====================
 
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+api.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (!message || !message.type) return false;
 
-    // Ping keep-alive
     if (message.type === 'PING') {
         sendResponse({ success: true, pong: true });
         return true;
@@ -598,14 +653,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
 
     if (message.type === 'CAPTURE_NATIVE_TAB') {
-        const windowId = sender.tab ? sender.tab.windowId : chrome.windows.WINDOW_ID_CURRENT;
-        chrome.tabs.captureVisibleTab(windowId, { format: 'png' }, (dataUrl) => {
-            if (chrome.runtime.lastError || !dataUrl) {
-                console.error('Lỗi captureVisibleTab:', chrome.runtime.lastError?.message);
-                sendResponse({ success: false, error: chrome.runtime.lastError?.message || 'Không thể chụp tab' });
-            } else {
-                sendResponse({ success: true, dataUrl: dataUrl });
-            }
+        captureTabUniversal(sender.tab ? sender.tab.windowId : null).then((dataUrl) => {
+            sendResponse({ success: true, dataUrl });
+        }).catch((err) => {
+            console.error('Lỗi captureNativeTab:', err);
+            sendResponse({ success: false, error: err.message });
         });
         return true;
     }
@@ -620,7 +672,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                     item.keyUsed = `Key #${res.keyIndex}/${res.totalKeys}`;
                     item.aiProvider = res.provider;
                     item.aiModel = res.model;
-                    chrome.storage.local.set({ captureHistory: captureHistory });
+                    api.storage.local.set({ captureHistory: captureHistory });
                 }
             }
             sendResponse({
@@ -639,7 +691,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return true;
     }
 
-    // DOUBLE CHECK SOÁT BÀI
     if (message.type === 'PERFORM_DOUBLE_CHECK') {
         performDoubleCheck(message.dataUrl, message.initialAnswer).then((res) => {
             if (message.captureId) {
@@ -647,7 +698,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 if (item) {
                     item.doubleCheckAnswer = res.answer;
                     item.doubleCheckModel = res.model;
-                    chrome.storage.local.set({ captureHistory: captureHistory });
+                    api.storage.local.set({ captureHistory: captureHistory });
                 }
             }
             sendResponse({
@@ -674,7 +725,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         captureHistory.unshift(newItem);
         if (captureHistory.length > 50) captureHistory = captureHistory.slice(0, 50);
         
-        chrome.storage.local.set({
+        api.storage.local.set({
             lastCapture: newItem,
             captureHistory: captureHistory
         });
@@ -683,28 +734,28 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
     
     if (message.type === 'GET_HISTORY') {
-        chrome.storage.local.get('captureHistory', (data) => {
-            sendResponse(data.captureHistory || []);
+        api.storage.local.get('captureHistory', (data) => {
+            sendResponse(data ? (data.captureHistory || []) : []);
         });
         return true;
     }
     
     if (message.type === 'CLEAR_HISTORY') {
         captureHistory = [];
-        chrome.storage.local.remove(['captureHistory', 'lastCapture']);
+        api.storage.local.remove(['captureHistory', 'lastCapture']);
         sendResponse({ success: true });
         return true;
     }
 
     if (message.type === 'DOWNLOAD_FILE') {
-        if (message.dataUrl) {
-            chrome.downloads.download({
+        if (message.dataUrl && api.downloads) {
+            api.downloads.download({
                 url: message.dataUrl,
                 filename: message.filename || 'capture.png',
                 saveAs: true
             }, (downloadId) => {
-                if (chrome.runtime.lastError) {
-                    sendResponse({ success: false, error: chrome.runtime.lastError.message });
+                if (api.runtime.lastError) {
+                    sendResponse({ success: false, error: api.runtime.lastError.message });
                 } else {
                     sendResponse({ success: true, downloadId: downloadId });
                 }
@@ -716,4 +767,4 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return false;
 });
 
-console.log('✅ Background ready with Ping Keep-Alive & Double Check Audit System!');
+console.log('✅ Background ready for both Kiwi Browser and Firefox Mobile!');
